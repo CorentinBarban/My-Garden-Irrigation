@@ -1,0 +1,77 @@
+{
+  "title": "My Garden Irrigation",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurar su huerto",
+        "description": "Dé un nombre a su huerto y seleccione el sensor que proporciona el ETo diario (mm/día).",
+        "data": {
+          "name": "Nombre del huerto",
+          "eto_entity_id": "Sensor ETo (mm/día)"
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "El nombre no puede estar vacío."
+    },
+    "abort": {
+      "already_configured": "Este huerto ya está configurado."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Gestionar su huerto",
+        "menu_options": {
+          "add_crop": "Añadir un cultivo",
+          "remove_crop": "Eliminar un cultivo",
+          "change_eto": "Cambiar fuente ETo"
+        }
+      },
+      "add_crop": {
+        "title": "Añadir un cultivo",
+        "data": {
+          "crop_type": "Cultivo",
+          "stage": "Etapa de crecimiento",
+          "nb_plants": "Número de plantas",
+          "density": "Densidad de plantación (plantas/m²)"
+        }
+      },
+      "remove_crop": {
+        "title": "Eliminar un cultivo",
+        "data": {
+          "crop_id": "Cultivo a eliminar"
+        }
+      },
+      "change_eto": {
+        "title": "Fuente ETo",
+        "data": {
+          "eto_entity_id": "Sensor ETo (mm/día)"
+        }
+      }
+    },
+    "abort": {
+      "no_crops": "No hay cultivos configurados. Añada primero un cultivo."
+    }
+  },
+  "selector": {
+    "crop_type": {
+      "options": {
+        "tomate": "Tomate",
+        "carotte": "Zanahoria",
+        "haricot": "Judía verde",
+        "poivron": "Pimiento",
+        "laitue": "Lechuga",
+        "courgette": "Calabacín",
+        "oignon": "Cebolla"
+      }
+    },
+    "stage": {
+      "options": {
+        "ini": "Inicial (germinación / establecimiento)",
+        "mid": "Media estación (pleno desarrollo)",
+        "end": "Final de estación (maduración)"
+      }
+    }
+  }
+}

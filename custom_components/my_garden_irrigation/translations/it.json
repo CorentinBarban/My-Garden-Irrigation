@@ -1,0 +1,77 @@
+{
+  "title": "My Garden Irrigation",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configura il tuo orto",
+        "description": "Dai un nome al tuo orto e seleziona il sensore che fornisce l'ETo giornaliero (mm/giorno).",
+        "data": {
+          "name": "Nome dell'orto",
+          "eto_entity_id": "Sensore ETo (mm/giorno)"
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Il nome non può essere vuoto."
+    },
+    "abort": {
+      "already_configured": "Questo orto è già configurato."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Gestisci il tuo orto",
+        "menu_options": {
+          "add_crop": "Aggiungi una coltura",
+          "remove_crop": "Rimuovi una coltura",
+          "change_eto": "Cambia sorgente ETo"
+        }
+      },
+      "add_crop": {
+        "title": "Aggiungi una coltura",
+        "data": {
+          "crop_type": "Coltura",
+          "stage": "Stadio di crescita",
+          "nb_plants": "Numero di piante",
+          "density": "Densità di piantagione (piante/m²)"
+        }
+      },
+      "remove_crop": {
+        "title": "Rimuovi una coltura",
+        "data": {
+          "crop_id": "Coltura da rimuovere"
+        }
+      },
+      "change_eto": {
+        "title": "Sorgente ETo",
+        "data": {
+          "eto_entity_id": "Sensore ETo (mm/giorno)"
+        }
+      }
+    },
+    "abort": {
+      "no_crops": "Nessuna coltura configurata. Aggiungi prima una coltura."
+    }
+  },
+  "selector": {
+    "crop_type": {
+      "options": {
+        "tomate": "Pomodoro",
+        "carotte": "Carota",
+        "haricot": "Fagiolino",
+        "poivron": "Peperone",
+        "laitue": "Lattuga",
+        "courgette": "Zucchina",
+        "oignon": "Cipolla"
+      }
+    },
+    "stage": {
+      "options": {
+        "ini": "Iniziale (germinazione / attecchimento)",
+        "mid": "Mezza stagione (pieno sviluppo)",
+        "end": "Fine stagione (maturazione)"
+      }
+    }
+  }
+}

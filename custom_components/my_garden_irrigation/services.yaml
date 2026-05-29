@@ -1,0 +1,6 @@
+recalculate:
+  name: Recalculer les besoins en eau
+  description: >
+    Force le recalcul immédiat de tous les sensors ETc.
+    Utile après une mise à jour manuelle de l'ETo ou pour tester une automatisation.
+  fields: {}

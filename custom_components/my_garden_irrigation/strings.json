@@ -1,0 +1,85 @@
+{
+  "title": "My Garden Irrigation",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurer votre potager",
+        "description": "Donnez un nom à votre potager et sélectionnez le sensor qui fournit l'ETo quotidien (mm/j). Recommandé : intégration Open-Meteo.",
+        "data": {
+          "name": "Nom du potager",
+          "eto_entity_id": "Sensor ETo (mm/j)"
+        },
+        "data_description": {
+          "eto_entity_id": "Sensor exposant l'évapotranspiration de référence en mm/jour (ex. Open-Meteo)."
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Le nom ne peut pas être vide."
+    },
+    "abort": {
+      "already_configured": "Ce potager est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Gérer votre potager",
+        "menu_options": {
+          "add_crop": "Ajouter une culture",
+          "remove_crop": "Supprimer une culture",
+          "change_eto": "Changer la source ETo"
+        }
+      },
+      "add_crop": {
+        "title": "Ajouter une culture",
+        "description": "Sélectionnez la culture, son stade de croissance et le nombre de plants. La densité FAO est pré-remplie — ajustez-la si votre espacement diffère.",
+        "data": {
+          "crop_type": "Culture",
+          "stage": "Stade de croissance",
+          "nb_plants": "Nombre de plants",
+          "density": "Densité de plantation (plants/m²)"
+        },
+        "data_description": {
+          "density": "Densité FAO par défaut : {fao_densities}"
+        }
+      },
+      "remove_crop": {
+        "title": "Supprimer une culture",
+        "data": {
+          "crop_id": "Culture à supprimer"
+        }
+      },
+      "change_eto": {
+        "title": "Source ETo",
+        "description": "Sélectionnez le sensor Home Assistant qui expose l'ETo en mm/jour.",
+        "data": {
+          "eto_entity_id": "Sensor ETo (mm/j)"
+        }
+      }
+    },
+    "abort": {
+      "no_crops": "Aucune culture configurée. Ajoutez d'abord une culture."
+    }
+  },
+  "selector": {
+    "crop_type": {
+      "options": {
+        "tomate": "Tomate",
+        "carotte": "Carotte",
+        "haricot": "Haricot vert",
+        "poivron": "Poivron",
+        "laitue": "Laitue",
+        "courgette": "Courgette",
+        "oignon": "Oignon"
+      }
+    },
+    "stage": {
+      "options": {
+        "ini": "Initial (semis / reprise)",
+        "mid": "Mi-saison (plein développement)",
+        "end": "Fin de saison (maturation)"
+      }
+    }
+  }
+}

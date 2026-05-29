@@ -1,0 +1,85 @@
+{
+  "title": "My Garden Irrigation",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up your garden",
+        "description": "Give your garden a name and select the sensor that provides the daily ETo (mm/day). Recommended: Open-Meteo integration.",
+        "data": {
+          "name": "Garden name",
+          "eto_entity_id": "ETo sensor (mm/day)"
+        },
+        "data_description": {
+          "eto_entity_id": "Sensor exposing reference evapotranspiration in mm/day (e.g. Open-Meteo)."
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Name cannot be empty."
+    },
+    "abort": {
+      "already_configured": "This garden is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Manage your garden",
+        "menu_options": {
+          "add_crop": "Add a crop",
+          "remove_crop": "Remove a crop",
+          "change_eto": "Change ETo source"
+        }
+      },
+      "add_crop": {
+        "title": "Add a crop",
+        "description": "Select the crop, its growth stage and plant count. The FAO density is pre-filled — adjust it if your spacing differs.",
+        "data": {
+          "crop_type": "Crop",
+          "stage": "Growth stage",
+          "nb_plants": "Number of plants",
+          "density": "Planting density (plants/m²)"
+        },
+        "data_description": {
+          "density": "FAO default density: {fao_densities}"
+        }
+      },
+      "remove_crop": {
+        "title": "Remove a crop",
+        "data": {
+          "crop_id": "Crop to remove"
+        }
+      },
+      "change_eto": {
+        "title": "ETo source",
+        "description": "Select the Home Assistant sensor that exposes ETo in mm/day.",
+        "data": {
+          "eto_entity_id": "ETo sensor (mm/day)"
+        }
+      }
+    },
+    "abort": {
+      "no_crops": "No crops configured. Add a crop first."
+    }
+  },
+  "selector": {
+    "crop_type": {
+      "options": {
+        "tomate": "Tomato",
+        "carotte": "Carrot",
+        "haricot": "Green bean",
+        "poivron": "Bell pepper",
+        "laitue": "Lettuce",
+        "courgette": "Zucchini",
+        "oignon": "Onion"
+      }
+    },
+    "stage": {
+      "options": {
+        "ini": "Initial (seedling / establishment)",
+        "mid": "Mid-season (full development)",
+        "end": "Late season (ripening)"
+      }
+    }
+  }
+}

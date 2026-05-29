@@ -1,0 +1,77 @@
+{
+  "title": "My Garden Irrigation",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Garten einrichten",
+        "description": "Geben Sie Ihrem Garten einen Namen und wählen Sie den Sensor aus, der den täglichen ETo-Wert (mm/Tag) liefert.",
+        "data": {
+          "name": "Gartenname",
+          "eto_entity_id": "ETo-Sensor (mm/Tag)"
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Der Name darf nicht leer sein."
+    },
+    "abort": {
+      "already_configured": "Dieser Garten ist bereits konfiguriert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Garten verwalten",
+        "menu_options": {
+          "add_crop": "Kultur hinzufügen",
+          "remove_crop": "Kultur entfernen",
+          "change_eto": "ETo-Quelle ändern"
+        }
+      },
+      "add_crop": {
+        "title": "Kultur hinzufügen",
+        "data": {
+          "crop_type": "Kultur",
+          "stage": "Wachstumsphase",
+          "nb_plants": "Anzahl der Pflanzen",
+          "density": "Pflanzdichte (Pflanzen/m²)"
+        }
+      },
+      "remove_crop": {
+        "title": "Kultur entfernen",
+        "data": {
+          "crop_id": "Zu entfernende Kultur"
+        }
+      },
+      "change_eto": {
+        "title": "ETo-Quelle",
+        "data": {
+          "eto_entity_id": "ETo-Sensor (mm/Tag)"
+        }
+      }
+    },
+    "abort": {
+      "no_crops": "Keine Kulturen konfiguriert. Fügen Sie zuerst eine Kultur hinzu."
+    }
+  },
+  "selector": {
+    "crop_type": {
+      "options": {
+        "tomate": "Tomate",
+        "carotte": "Karotte",
+        "haricot": "Grüne Bohne",
+        "poivron": "Paprika",
+        "laitue": "Salat",
+        "courgette": "Zucchini",
+        "oignon": "Zwiebel"
+      }
+    },
+    "stage": {
+      "options": {
+        "ini": "Anfangsphase (Keimung / Etablierung)",
+        "mid": "Mittlere Saison (volle Entwicklung)",
+        "end": "Späte Saison (Reifung)"
+      }
+    }
+  }
+}
