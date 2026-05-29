@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "minor_version": 1,
+  "key": "smarthrt.01KJJ5AS8QECRHS4XG2SKVGJ0E",
+  "data": {
+    "target_hour": "20:00:00",
+    "recoverycalc_hour": "21:00:00",
+    "rcth": 66.66666666666667,
+    "rpth": 50.0,
+    "rcth_lw": 54.53333333333334,
+    "rcth_hw": 46.133333333333326,
+    "rpth_lw": 50.0,
+    "rpth_hw": 50.0,
+    "current_state": "heating_on",
+    "stop_lag_duration": 25.036206007003784,
+    "time_recovery_calc": "2026-02-28T14:38:21.203435+01:00",
+    "temp_recovery_calc": 19.6,
+    "text_recovery_calc": 11.666666666666666,
+    "recovery_start_hour": "2026-02-28T16:13:30+01:00",
+    "wind_speed_forecast_avg": 8.765560319999999,
+    "temperature_forecast_avg": 11.481481481481481,
+    "wind_speed_history": [
+      2.8074111999999998,
+      1.9982687999999997
+    ],
+    "last_rcth_error": 25.0,
+    "last_rpth_error": 0.0
+  }
+}

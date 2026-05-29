@@ -1,0 +1,14 @@
+{
+  "features": {
+    "ghcr.io/devcontainers-extra/features/exa:1": {
+      "version": "1.0.16",
+      "resolved": "ghcr.io/devcontainers-extra/features/exa@sha256:3b23011e9b0548e65ab244fcd048e46b2c26520817e9a53b885f3f001130248e",
+      "integrity": "sha256:3b23011e9b0548e65ab244fcd048e46b2c26520817e9a53b885f3f001130248e"
+    },
+    "ghcr.io/devcontainers-extra/features/ffmpeg-apt-get:1": {
+      "version": "1.0.17",
+      "resolved": "ghcr.io/devcontainers-extra/features/ffmpeg-apt-get@sha256:735491c8e9b2236cae727d6d4904663f6a58eb131d8c4b6b18fd0eea3d8c5b71",
+      "integrity": "sha256:735491c8e9b2236cae727d6d4904663f6a58eb131d8c4b6b18fd0eea3d8c5b71"
+    }
+  }
+}

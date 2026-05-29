@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "minor_version": 1,
+  "key": "smarthrt.01KJMFWRXJVNBGXB6415PR0H64",
+  "data": {
+    "target_hour": "23:22:00",
+    "recoverycalc_hour": "23:25:00",
+    "rcth": 50.0,
+    "rpth": 50.0,
+    "rcth_lw": 50.0,
+    "rcth_hw": 50.0,
+    "rpth_lw": 50.0,
+    "rpth_hw": 50.0,
+    "current_state": "detecting_lag",
+    "stop_lag_duration": 60.00309181213379,
+    "time_recovery_calc": "2026-03-18T23:25:00.009668+01:00",
+    "temp_recovery_calc": 20.0,
+    "text_recovery_calc": 11.0,
+    "recovery_start_hour": "2026-03-19T20:37:35+01:00",
+    "wind_speed_forecast_avg": 43.20000000000001,
+    "temperature_forecast_avg": 10.366666666666667,
+    "wind_speed_history": [
+      2.0,
+      2.0,
+      12.0
+    ],
+    "last_rcth_error": 0.0,
+    "last_rpth_error": 0.0
+  }
+}
