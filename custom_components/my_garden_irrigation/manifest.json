@@ -1,0 +1,13 @@
+{
+  "domain": "my_garden_irrigation",
+  "name": "My Garden Irrigation",
+  "codeowners": ["@CorentinBarban"],
+  "config_flow": true,
+  "documentation": "https://github.com/CorentinBarban/My-Garden-Irrigation",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/CorentinBarban/My-Garden-Irrigation/issues",
+  "quality_scale": "silver",
+  "requirements": [],
+  "version": "1.0.0"
+}
