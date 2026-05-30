@@ -51,16 +51,56 @@
       "no_crops": "Aucune culture configurée. Ajoutez d'abord une culture."
     }
   },
+  "entity": {
+    "number": {
+      "nb_plants": {
+        "name": "Nombre de plants"
+      },
+      "density": {
+        "name": "Densité (plants/m²)"
+      }
+    },
+    "select": {
+      "stage": {
+        "name": "Stade de croissance",
+        "state": {
+          "ini": "Initial (semis / reprise)",
+          "mid": "Mi-saison (plein développement)",
+          "end": "Fin de saison (maturation)"
+        }
+      }
+    }
+  },
   "selector": {
     "crop_type": {
       "options": {
-        "tomate": "Tomate",
+        "ail": "Ail",
+        "artichaut": "Artichaut",
+        "asperge": "Asperge",
+        "aubergine": "Aubergine",
+        "basilic": "Basilic",
+        "betterave": "Betterave",
+        "brocoli": "Brocoli",
         "carotte": "Carotte",
-        "haricot": "Haricot vert",
-        "poivron": "Poivron",
-        "laitue": "Laitue",
+        "celeri": "Céleri",
+        "chou": "Chou",
+        "chou_fleur": "Chou-fleur",
+        "concombre": "Concombre",
         "courgette": "Courgette",
-        "oignon": "Oignon"
+        "epinard": "Épinard",
+        "fraise": "Fraise",
+        "haricot_vert": "Haricot vert",
+        "laitue": "Laitue",
+        "melon": "Melon",
+        "oignon": "Oignon",
+        "persil": "Persil",
+        "petits_pois": "Petits pois",
+        "poireau": "Poireau",
+        "poivron": "Poivron",
+        "pomme_de_terre": "Pomme de terre",
+        "potiron": "Potiron",
+        "radis": "Radis",
+        "tomate": "Tomate"
       }
     },
     "stage": {

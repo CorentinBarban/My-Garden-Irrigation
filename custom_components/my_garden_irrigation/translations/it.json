@@ -47,16 +47,56 @@
       "no_crops": "Nessuna coltura configurata. Aggiungi prima una coltura."
     }
   },
+  "entity": {
+    "number": {
+      "nb_plants": {
+        "name": "Numero di piante"
+      },
+      "density": {
+        "name": "Densità (piante/m²)"
+      }
+    },
+    "select": {
+      "stage": {
+        "name": "Stadio di crescita",
+        "state": {
+          "ini": "Iniziale (germinazione / attecchimento)",
+          "mid": "Mezza stagione (pieno sviluppo)",
+          "end": "Fine stagione (maturazione)"
+        }
+      }
+    }
+  },
   "selector": {
     "crop_type": {
       "options": {
-        "tomate": "Pomodoro",
+        "ail": "Aglio",
+        "asperge": "Asparago",
+        "betterave": "Barbabietola",
+        "basilic": "Basilico",
+        "brocoli": "Broccolo",
+        "artichaut": "Carciofo",
         "carotte": "Carota",
-        "haricot": "Fagiolino",
-        "poivron": "Peperone",
+        "chou_fleur": "Cavolfiore",
+        "chou": "Cavolo",
+        "concombre": "Cetriolo",
+        "oignon": "Cipolla",
+        "haricot_vert": "Fagiolino",
+        "fraise": "Fragola",
         "laitue": "Lattuga",
-        "courgette": "Zucchina",
-        "oignon": "Cipolla"
+        "aubergine": "Melanzana",
+        "melon": "Melone",
+        "pomme_de_terre": "Patata",
+        "poivron": "Peperone",
+        "petits_pois": "Piselli",
+        "tomate": "Pomodoro",
+        "poireau": "Porro",
+        "persil": "Prezzemolo",
+        "radis": "Ravanello",
+        "celeri": "Sedano",
+        "epinard": "Spinacio",
+        "potiron": "Zucca",
+        "courgette": "Zucchina"
       }
     },
     "stage": {

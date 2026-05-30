@@ -1,8 +1,5 @@
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+*.py[cod]
 *.egg-info/
 dist/
 build/
@@ -13,3 +10,4 @@ venv/
 .DS_Store
 *.db-shm
 *.db-wal
+.devcontainer/config/

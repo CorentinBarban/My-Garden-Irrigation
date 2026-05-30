@@ -127,7 +127,7 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
                     ),
                     vol.Required(CONF_NB_PLANTS): selector.NumberSelector(
                         selector.NumberSelectorConfig(
-                            min=1, max=10_000, step=1, mode="box"
+                            min=1, max=100, step=1, mode="box"
                         )
                     ),
                     vol.Required(CONF_DENSITY): selector.NumberSelector(

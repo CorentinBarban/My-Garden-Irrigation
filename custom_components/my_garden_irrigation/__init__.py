@@ -6,7 +6,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 
-from .const import CONF_CROPS, DOMAIN, PLATFORMS, SERVICE_RECALCULATE
+from .const import CONF_CROPS, DOMAIN, OPTIONS_FIELD_UPDATE_FLAG, PLATFORMS, SERVICE_RECALCULATE
 from .coordinator import IrrigationCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,5 +61,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Rechargement déclenché par un changement d'options."""
+    """Rechargement déclenché par un changement d'options.
+
+    Un simple ajustement du nombre de plants ne nécessite pas de rechargement complet :
+    le coordinateur est rafraîchi directement par NbPlantsNumber.async_set_native_value.
+    """
+    field_flags: set = hass.data.get(DOMAIN, {}).get(OPTIONS_FIELD_UPDATE_FLAG, set())
+    if entry.entry_id in field_flags:
+        field_flags.discard(entry.entry_id)
+        return
     await hass.config_entries.async_reload(entry.entry_id)

@@ -28,6 +28,7 @@ from .const import (
     CONF_NAME,
     DOMAIN,
 )
+
 from .coordinator import IrrigationCoordinator
 from .core.models import CropResult, IrrigationData
 
@@ -47,7 +48,6 @@ async def async_setup_entry(
     for crop in entry.options.get(CONF_CROPS, []):
         entities.append(CropIrrigationSensor(coordinator, entry, crop))
         entities.append(KcSensor(coordinator, entry, crop))
-        entities.append(ETcSensor(coordinator, entry, crop))
 
     async_add_entities(entities)
 
@@ -171,62 +171,13 @@ class KcSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity):
         }
 
 
-class ETcSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity):
-    """Évapotranspiration culturale ETc (mm/j) = Kc × ETo."""
-
-    _attr_device_class = SensorDeviceClass.PRECIPITATION
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfPrecipitationDepth.MILLIMETERS
-    _attr_has_entity_name = True
-    _attr_attribution = ATTRIBUTION
-    _attr_icon = "mdi:water-sync"
-
-    def __init__(
-        self,
-        coordinator: IrrigationCoordinator,
-        entry: ConfigEntry,
-        crop: dict,
-    ) -> None:
-        super().__init__(coordinator)
-        self._crop_id: str = crop[CONF_CROP_ID]
-        self._entry_id: str = entry.entry_id
-        self._attr_unique_id = f"{entry.entry_id}_{self._crop_id}_etc"
-        self._attr_name = "ETc"
-        self._attr_device_info = _plant_device_info(entry, crop)
-
-    def _crop_result(self) -> CropResult | None:
-        data: IrrigationData | None = self.coordinator.data
-        if data is None:
-            return None
-        return data.crops.get(self._crop_id)
-
-    @property
-    def native_value(self) -> float | None:
-        result = self._crop_result()
-        if result is None:
-            return None
-        return round(result.kc * result.eto_mm, 2)
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        result = self._crop_result()
-        if result is None:
-            return {}
-        return {
-            ATTR_CROP_TYPE: result.crop_type,
-            ATTR_STAGE: result.stage,
-            ATTR_KC: result.kc,
-            ATTR_ETO_MM: result.eto_mm,
-            ATTR_VIA_DEVICE: self._entry_id,
-        }
-
-
 class EToSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity):
     """Évapotranspiration de référence du jour (mm/j) — source Open-Meteo."""
 
     _attr_device_class = SensorDeviceClass.PRECIPITATION
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPrecipitationDepth.MILLIMETERS
+    _attr_suggested_display_precision = 2
     _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
     _attr_icon = "mdi:sun-thermometer-outline"

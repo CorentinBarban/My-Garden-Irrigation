@@ -47,14 +47,54 @@
       "no_crops": "Keine Kulturen konfiguriert. Fügen Sie zuerst eine Kultur hinzu."
     }
   },
+  "entity": {
+    "number": {
+      "nb_plants": {
+        "name": "Anzahl der Pflanzen"
+      },
+      "density": {
+        "name": "Dichte (Pflanzen/m²)"
+      }
+    },
+    "select": {
+      "stage": {
+        "name": "Wachstumsphase",
+        "state": {
+          "ini": "Anfangsphase (Keimung / Etablierung)",
+          "mid": "Mittlere Saison (volle Entwicklung)",
+          "end": "Späte Saison (Reifung)"
+        }
+      }
+    }
+  },
   "selector": {
     "crop_type": {
       "options": {
-        "tomate": "Tomate",
+        "artichaut": "Artischocke",
+        "aubergine": "Aubergine",
+        "basilic": "Basilikum",
+        "chou_fleur": "Blumenkohl",
+        "brocoli": "Brokkoli",
+        "petits_pois": "Erbsen",
+        "fraise": "Erdbeere",
+        "haricot_vert": "Grüne Bohne",
+        "concombre": "Gurke",
         "carotte": "Karotte",
-        "haricot": "Grüne Bohne",
+        "pomme_de_terre": "Kartoffel",
+        "ail": "Knoblauch",
+        "chou": "Kohl",
+        "potiron": "Kürbis",
+        "poireau": "Lauch",
+        "melon": "Melone",
         "poivron": "Paprika",
+        "persil": "Petersilie",
+        "radis": "Radieschen",
+        "betterave": "Rote Bete",
         "laitue": "Salat",
+        "celeri": "Sellerie",
+        "asperge": "Spargel",
+        "epinard": "Spinat",
+        "tomate": "Tomate",
         "courgette": "Zucchini",
         "oignon": "Zwiebel"
       }

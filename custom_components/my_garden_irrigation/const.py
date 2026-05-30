@@ -1,7 +1,7 @@
 """Constantes pour l'intégration My Garden Irrigation."""
 
 DOMAIN = "my_garden_irrigation"
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "number", "select"]
 ATTRIBUTION = "Données Kc : FAO Irrigation and Drainage Paper 56"
 
 # --- Config / Options entry keys ---
@@ -22,24 +22,64 @@ STAGES = [STAGE_INI, STAGE_MID, STAGE_END]
 
 # --- Cultures supportées (clés JSON Kc) ---
 SUPPORTED_CROPS = [
-    "tomate",
+    "ail",
+    "artichaut",
+    "asperge",
+    "aubergine",
+    "basilic",
+    "betterave",
+    "brocoli",
     "carotte",
-    "haricot",
-    "poivron",
-    "laitue",
+    "celeri",
+    "chou",
+    "chou_fleur",
+    "concombre",
     "courgette",
+    "epinard",
+    "fraise",
+    "haricot_vert",
+    "laitue",
+    "melon",
     "oignon",
+    "persil",
+    "petits_pois",
+    "poireau",
+    "poivron",
+    "pomme_de_terre",
+    "potiron",
+    "radis",
+    "tomate",
 ]
 
 # --- Densités FAO par défaut (plants/m²), dupliquées ici pour le Config Flow ---
 FAO_DEFAULT_DENSITIES: dict[str, float] = {
-    "tomate": 3.0,
+    "ail": 20.0,
+    "artichaut": 1.0,
+    "asperge": 3.0,
+    "aubergine": 2.0,
+    "basilic": 9.0,
+    "betterave": 12.0,
+    "brocoli": 4.0,
     "carotte": 60.0,
-    "haricot": 12.0,
-    "poivron": 3.0,
-    "laitue": 8.0,
+    "celeri": 6.0,
+    "chou": 4.0,
+    "chou_fleur": 4.0,
+    "concombre": 2.0,
     "courgette": 1.0,
+    "epinard": 16.0,
+    "fraise": 7.0,
+    "haricot_vert": 12.0,
+    "laitue": 8.0,
+    "melon": 1.0,
     "oignon": 25.0,
+    "persil": 16.0,
+    "petits_pois": 20.0,
+    "poireau": 10.0,
+    "poivron": 3.0,
+    "pomme_de_terre": 5.0,
+    "potiron": 1.0,
+    "radis": 80.0,
+    "tomate": 3.0,
 }
 
 # --- Attributs des sensors ---
@@ -65,6 +105,9 @@ KC_REMOTE_URL = (
 )
 KC_FETCH_TIMEOUT = 10  # secondes
 KC_CACHE_KEY = f"{DOMAIN}_kc_data"
+
+# --- Flag interne : mise à jour d'un champ sans rechargement complet ---
+OPTIONS_FIELD_UPDATE_FLAG = "_field_update"
 
 # --- Services ---
 SERVICE_RECALCULATE = "recalculate"

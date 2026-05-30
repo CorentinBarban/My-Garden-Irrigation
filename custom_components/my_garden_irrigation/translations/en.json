@@ -51,16 +51,56 @@
       "no_crops": "No crops configured. Add a crop first."
     }
   },
+  "entity": {
+    "number": {
+      "nb_plants": {
+        "name": "Number of plants"
+      },
+      "density": {
+        "name": "Density (plants/m²)"
+      }
+    },
+    "select": {
+      "stage": {
+        "name": "Growth stage",
+        "state": {
+          "ini": "Initial (seedling / establishment)",
+          "mid": "Mid-season (full development)",
+          "end": "Late season (ripening)"
+        }
+      }
+    }
+  },
   "selector": {
     "crop_type": {
       "options": {
-        "tomate": "Tomato",
-        "carotte": "Carrot",
-        "haricot": "Green bean",
+        "artichaut": "Artichoke",
+        "asperge": "Asparagus",
+        "aubergine": "Aubergine",
+        "basilic": "Basil",
+        "betterave": "Beetroot",
         "poivron": "Bell pepper",
+        "brocoli": "Broccoli",
+        "chou": "Cabbage",
+        "carotte": "Carrot",
+        "chou_fleur": "Cauliflower",
+        "celeri": "Celery",
+        "courgette": "Courgette",
+        "concombre": "Cucumber",
+        "ail": "Garlic",
+        "haricot_vert": "Green bean",
+        "petits_pois": "Green peas",
+        "poireau": "Leek",
         "laitue": "Lettuce",
-        "courgette": "Zucchini",
-        "oignon": "Onion"
+        "melon": "Melon",
+        "oignon": "Onion",
+        "persil": "Parsley",
+        "pomme_de_terre": "Potato",
+        "potiron": "Pumpkin",
+        "radis": "Radish",
+        "epinard": "Spinach",
+        "fraise": "Strawberry",
+        "tomate": "Tomato"
       }
     },
     "stage": {

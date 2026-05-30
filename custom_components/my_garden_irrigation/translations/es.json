@@ -47,16 +47,56 @@
       "no_crops": "No hay cultivos configurados. Añada primero un cultivo."
     }
   },
+  "entity": {
+    "number": {
+      "nb_plants": {
+        "name": "Número de plantas"
+      },
+      "density": {
+        "name": "Densidad (plantas/m²)"
+      }
+    },
+    "select": {
+      "stage": {
+        "name": "Etapa de crecimiento",
+        "state": {
+          "ini": "Inicial (germinación / establecimiento)",
+          "mid": "Media estación (pleno desarrollo)",
+          "end": "Final de estación (maduración)"
+        }
+      }
+    }
+  },
   "selector": {
     "crop_type": {
       "options": {
-        "tomate": "Tomate",
-        "carotte": "Zanahoria",
-        "haricot": "Judía verde",
-        "poivron": "Pimiento",
-        "laitue": "Lechuga",
+        "ail": "Ajo",
+        "basilic": "Albahaca",
+        "artichaut": "Alcachofa",
+        "celeri": "Apio",
+        "aubergine": "Berenjena",
+        "brocoli": "Brócoli",
         "courgette": "Calabacín",
-        "oignon": "Cebolla"
+        "potiron": "Calabaza",
+        "oignon": "Cebolla",
+        "chou": "Col",
+        "chou_fleur": "Coliflor",
+        "asperge": "Espárrago",
+        "epinard": "Espinaca",
+        "fraise": "Fresa",
+        "petits_pois": "Guisantes",
+        "haricot_vert": "Judía verde",
+        "laitue": "Lechuga",
+        "melon": "Melón",
+        "pomme_de_terre": "Patata",
+        "concombre": "Pepino",
+        "persil": "Perejil",
+        "poivron": "Pimiento",
+        "poireau": "Puerro",
+        "radis": "Rábano",
+        "betterave": "Remolacha",
+        "tomate": "Tomate",
+        "carotte": "Zanahoria"
       }
     },
     "stage": {
