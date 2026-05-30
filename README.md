@@ -1,75 +1,112 @@
-# My Garden Irrigation — Intégration Home Assistant
+# 🌿 My Garden Irrigation — Intégration Home Assistant
 
-## Présentation
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+Version : 1.0.0
 
-**My Garden Irrigation** est une intégration custom pour Home Assistant qui calcule automatiquement les besoins en eau de chaque culture de votre potager, en temps réel et sans abonnement.
+**My Garden Irrigation** (`my_garden_irrigation`) est une intégration personnalisée pour Home Assistant qui évalue les besoins en eau des cultures d'un potager. Elle s’appuie sur la méthode de calcul de l’évapotranspiration issue de la publication FAO Irrigation and Drainage Paper 56.
 
-Elle combine les données météo locales déjà disponibles dans votre installation Home Assistant avec les coefficients culturaux de référence de la FAO (Food and Agriculture Organization), pour vous dire précisément combien de litres arroser — par culture, par jour, par semaine.
-
----
-
-## Le problème qu'elle résout
-
-Arroser un potager à l'instinct, c'est souvent trop ou pas assez. Trop d'eau favorise les maladies fongiques et gaspille une ressource précieuse. Pas assez, et les rendements s'effondrent.
-
-Les besoins en eau varient selon la culture (une tomate n'a pas les mêmes exigences qu'une carotte), le stade de croissance (une plante en fleur boit plus qu'un semis), et les conditions météo du moment (une canicule multiplie les besoins par deux). Gérer tout cela manuellement est fastidieux.
-
-**My Garden Irrigation automatise ce raisonnement agronomique** et l'intègre directement dans votre domotique.
+L'intégration récupère l'évapotranspiration de référence (ETo) quotidienne via l'API Open-Meteo et télécharge les coefficients culturaux (Kc) depuis un fichier distant. Son mode de fonctionnement est basé sur le principe du "cloud polling".
 
 ---
 
-## Comment ça fonctionne
+## 📐 Fonctionnement et formule de calcul
 
-L'intégration s'appuie sur la formule de référence mondiale en agronomie (FAO Paper 56) :
+L'estimation repose sur la formule d'agronomie standard :
 
 ```
 ETc = Kc × ETo
 ```
 
-- **ETo** — l'évapotranspiration de référence du jour, issue de votre source météo Home Assistant (Open-Meteo, station locale, etc.), en mm/jour
-- **Kc** — le coefficient cultural propre à chaque plante et à son stade de croissance, récupéré depuis un fichier de référence FAO hébergé en ligne
-- **ETc** — le besoin en eau réel de la culture, converti en litres selon la surface occupée
+- **ETo** : Évapotranspiration de référence journalière (en mm/jour), issue d'Open-Meteo.
+- **Kc** : Coefficient cultural propre à chaque plante et indexé selon son stade de croissance.
+- **ETc** : Besoin en eau brut converti en litres en fonction de la surface occupée.
 
-La surface de chaque culture est calculée à partir du **nombre de plants** que vous avez et de leur densité de plantation, ce qui est plus naturel que de mesurer des mètres carrés.
-
----
-
-## Ce que vous obtenez dans Home Assistant
-
-Pour chaque culture configurée, l'intégration crée un sensor dédié :
-
-- `sensor.potager_tomate_litres_jour` 
-- `sensor.potager_carotte_litres_jour`
-- `sensor.potager_total_litres_jour`
-
-Chaque sensor expose des attributs détaillés : litres par plant, surface calculée, coefficient Kc utilisé, projection hebdomadaire.
-
-Ces entités s'utilisent comme n'importe quel sensor HA : dans vos **automatisations** (déclencher une électrovanne quand le besoin dépasse un seuil), vos **dashboards Lovelace**, ou vos **notifications** matinales.
+La surface d'une zone de culture est automatiquement déduite à partir du **nombre de plants** et de la **densité de plantation** configurés (plants par m²).
 
 ---
 
-## Cultures supportées
+## 📊 Entités générées
 
-Tomate · Carotte · Haricot vert · Poivron · Laitue · Courgette · Oignon
+Pour chaque zone ou culture ajoutée, l’intégration expose des entités à travers trois plateformes (`sensor`, `number` et `select`) :
 
-D'autres cultures peuvent être ajoutées via le fichier de données FAO, sans mise à jour du code.
+### 🔍 Capteurs (`sensor`)
+
+Chaque capteur principal de culture fournit le volume requis et embarque une liste d'attributs pour vos automatisations et vos suivis :
+
+- `crop_type` & `stage` : Type de culture et stade actuel.
+- `nb_plants` & `density_plants_per_m2` : Nombre de pieds et densité par m².
+- `surface_m2` : Surface au sol calculée.
+- `kc` & `eto_mm` : Valeurs de calcul agronomiques du jour.
+- `precipitation_mm` & `effective_rainfall_mm` : Pluviométrie et pluie efficace retenues.
+- `cumulative_need_liters` : Bilan du besoin hydrique cumulé.
+- `recommended_duration_minutes` : Temps d'arrosage recommandé basé sur le débit configuré.
+- **Paramètres de fractionnement** : Détails des cycles si ce mode est activé (`is_fractioned`, `cycles_count`, `duration_per_cycle_minutes`, `soak_duration_minutes`).
+
+### ⚙️ Contrôles numériques (`number`) et Sélecteurs (`select`)
+
+Ces entités vous permettent d'ajuster dynamiquement les paramètres ou de modifier les modes directement depuis vos tableaux de bord Lovelace.
+
+---
+
+## 🥕 Cultures prises en charge
+
+L'intégration intègre nativement les paramètres de densité de plantation par défaut (exprimés en plants/m²) pour **27 cultures** issues du référentiel FAO :
+
+Ail · Artichaut · Asperge · Aubergine · Basilic · Betterave · Brocoli · Carotte · Céleri · Chou · Chou-fleur · Concombre · Courgette · Épinard · Fraise · Haricot vert · Laitue · Melon · Oignon · Persil · Petits pois · Poireau · Poivron · Pomme de terre · Potiron · Radis · Tomate.
+
+### 🔄 Stades de croissance gérés
+
+Pour chaque plante ajoutée, vous définissez son niveau de développement parmi les trois options suivantes :
+
+- `ini` : Stade initial
+- `mid` : Stade intermédiaire
+- `end` : Stade final/fin de saison
 
 ---
 
-## Installation et configuration
+## 🛠️ Configuration
 
-L'intégration s'installe via **HACS** en quelques clics. La configuration se fait entièrement depuis l'interface Home Assistant :
+La mise en place s'effectue entièrement par l'interface graphique de Home Assistant via un **Config Flow**.
 
-1. Pouvoir recuperer les données depuis Open-Meteo
-2. Ajouter ses cultures, avec le nombre de plants et le stade de croissance
-3. C'est tout — les sensors apparaissent immédiatement
+### 🔬 Options avancées disponibles :
 
+- **Gestion d'une vanne globale** : Liaison avec une entité de vanne parente (`global_valve_entity_id`) et saisie du débit d'eau (`global_flow_rate`) pour obtenir l'estimation exacte du temps d'ouverture en minutes.
+- **Fréquence d'arrosage** : Choix entre un rythme quotidien (`daily`) ou un intervalle personnalisé défini en nombre de jours (`interval`).
+- **Mode de distribution** :
+  - Continu (`continuous`)
+  - Fractionné (`fractioned`) : Séquence l'arrosage en plusieurs cycles (3 cycles par défaut) entrecoupés de pauses (15 minutes par défaut) pour éviter le ruissellement et optimiser la pénétration de l'eau dans le sol.
+
+---
+
+## 🚀 Services exposés
+
+L'intégration enregistre le service suivant dans Home Assistant :
+
+- **`my_garden_irrigation.recalculate`** : Force la mise à jour immédiate et le recalcul des valeurs hydro-agronomiques sans attendre la planification de mise à jour automatique.
 
 ---
 
-## Prérequis
+## 📥 Installation
 
-- Home Assistant 2024.1 ou supérieur
-- HACS installé
+### 🛒 Via HACS (recommandé)
+
+1. Ouvrez l'interface **HACS** dans votre instance Home Assistant.
+2. Cliquez sur les trois points en haut à droite et sélectionnez **Dépôts personnalisés**.
+3. Renseignez l'URL de ce dépôt GitHub, sélectionnez la catégorie **Intégration** et cliquez sur **Ajouter**.
+4. Recherchez `My Garden Irrigation` puis cliquez sur **Télécharger**.
+5. Redémarrez Home Assistant.
+
+### ⚙️ Configuration initiale
+
+1. Accédez à **Paramètres** > **Appareils et services**.
+2. Cliquez sur **Ajouter une intégration** en bas à droite.
+3. Recherchez `My Garden Irrigation` dans la liste.
+4. Remplissez les formulaires guidés pour ajouter vos cultures et lier vos équipements de distribution d'eau.
 
 ---
+
+## 📋 Prérequis
+
+- Home Assistant 2024.1 ou version ultérieure.
+- Extension HACS opérationnelle.
+- Connexion Internet active pour l'envoi des requêtes Open-Meteo et FAO (Cloud Polling).
