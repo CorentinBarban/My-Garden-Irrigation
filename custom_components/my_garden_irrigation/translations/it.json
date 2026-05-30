@@ -4,10 +4,9 @@
     "step": {
       "user": {
         "title": "Configura il tuo orto",
-        "description": "Dai un nome al tuo orto e seleziona il sensore che fornisce l'ETo giornaliero (mm/giorno).",
+        "description": "Dai un nome al tuo orto. L'ETo verrà recuperato automaticamente da Open-Meteo usando le coordinate configurate in Home Assistant.",
         "data": {
-          "name": "Nome dell'orto",
-          "eto_entity_id": "Sensore ETo (mm/giorno)"
+          "name": "Nome dell'orto"
         }
       }
     },
@@ -24,13 +23,13 @@
         "title": "Gestisci il tuo orto",
         "menu_options": {
           "add_crop": "Aggiungi una coltura",
-          "remove_crop": "Rimuovi una coltura",
-          "change_eto": "Cambia sorgente ETo"
+          "remove_crop": "Rimuovi una coltura"
         }
       },
       "add_crop": {
         "title": "Aggiungi una coltura",
         "data": {
+          "crop_name": "Nome dell'area",
           "crop_type": "Coltura",
           "stage": "Stadio di crescita",
           "nb_plants": "Numero di piante",
@@ -41,12 +40,6 @@
         "title": "Rimuovi una coltura",
         "data": {
           "crop_id": "Coltura da rimuovere"
-        }
-      },
-      "change_eto": {
-        "title": "Sorgente ETo",
-        "data": {
-          "eto_entity_id": "Sensore ETo (mm/giorno)"
         }
       }
     },

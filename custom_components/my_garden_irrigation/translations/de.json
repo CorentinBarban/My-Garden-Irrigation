@@ -4,10 +4,9 @@
     "step": {
       "user": {
         "title": "Garten einrichten",
-        "description": "Geben Sie Ihrem Garten einen Namen und wählen Sie den Sensor aus, der den täglichen ETo-Wert (mm/Tag) liefert.",
+        "description": "Geben Sie Ihrem Garten einen Namen. Der ETo-Wert wird automatisch von Open-Meteo anhand der in Home Assistant konfigurierten Koordinaten abgerufen.",
         "data": {
-          "name": "Gartenname",
-          "eto_entity_id": "ETo-Sensor (mm/Tag)"
+          "name": "Gartenname"
         }
       }
     },
@@ -24,13 +23,13 @@
         "title": "Garten verwalten",
         "menu_options": {
           "add_crop": "Kultur hinzufügen",
-          "remove_crop": "Kultur entfernen",
-          "change_eto": "ETo-Quelle ändern"
+          "remove_crop": "Kultur entfernen"
         }
       },
       "add_crop": {
         "title": "Kultur hinzufügen",
         "data": {
+          "crop_name": "Name des Bereichs",
           "crop_type": "Kultur",
           "stage": "Wachstumsphase",
           "nb_plants": "Anzahl der Pflanzen",
@@ -41,12 +40,6 @@
         "title": "Kultur entfernen",
         "data": {
           "crop_id": "Zu entfernende Kultur"
-        }
-      },
-      "change_eto": {
-        "title": "ETo-Quelle",
-        "data": {
-          "eto_entity_id": "ETo-Sensor (mm/Tag)"
         }
       }
     },
