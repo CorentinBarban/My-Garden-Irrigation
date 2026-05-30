@@ -47,6 +47,13 @@ class CropResult:
     nb_plants: int
     density: float
 
+    # Bilan hydrique (ADR-008) — valeurs par défaut pour la rétrocompatibilité
+    watering_applied_today_liters: float = 0.0
+    """Volume d'arrosage distribué aujourd'hui à cette culture (L), issu de la vanne globale."""
+
+    daily_need_liters: float = 0.0
+    """Besoin journalier net = max(0, liters − watering_applied_today_liters)."""
+
 
 @dataclass(frozen=True)
 class IrrigationData:
@@ -56,13 +63,19 @@ class IrrigationData:
     """crop_id → CropResult pour chaque culture configurée."""
 
     total_liters: float = 0.0
-    """Somme nette de toutes les cultures (litres/jour)."""
+    """Somme nette de toutes les cultures avant déduction de l'arrosage (litres/jour)."""
+
+    total_daily_need_liters: float = 0.0
+    """Somme des besoins journaliers après déduction de l'arrosage d'aujourd'hui (litres/jour)."""
 
     eto_mm: float = 0.0
     """ETo du jour utilisée pour tous les calculs (mm/j)."""
 
     precipitation_mm: float = 0.0
     """Précipitations brutes du jour (mm) — source Open-Meteo."""
+
+    cumulative_need: dict[str, float] = field(default_factory=dict)
+    """crop_id → bilan hydrique cumulé non satisfait depuis le dernier arrosage (L)."""
 
 
 # ---------------------------------------------------------------------------

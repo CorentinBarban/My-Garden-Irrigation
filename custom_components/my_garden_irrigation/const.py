@@ -82,6 +82,26 @@ FAO_DEFAULT_DENSITIES: dict[str, float] = {
     "tomate": 3.0,
 }
 
+# --- Vanne globale (ADR-009) ---
+CONF_GLOBAL_VALVE_ENTITY_ID = "global_valve_entity_id"
+CONF_GLOBAL_FLOW_RATE = "global_flow_rate"
+
+# --- Fréquence et mode d'arrosage (ADR-010) ---
+CONF_WATERING_FREQUENCY = "watering_frequency"
+CONF_WATERING_INTERVAL_DAYS = "watering_interval_days"
+CONF_WATERING_MODE = "watering_mode"
+
+WATERING_FREQUENCY_DAILY = "daily"
+WATERING_FREQUENCY_INTERVAL = "interval"
+WATERING_FREQUENCIES = [WATERING_FREQUENCY_DAILY, WATERING_FREQUENCY_INTERVAL]
+
+WATERING_MODE_CONTINUOUS = "continuous"
+WATERING_MODE_FRACTIONED = "fractioned"
+WATERING_MODES = [WATERING_MODE_CONTINUOUS, WATERING_MODE_FRACTIONED]
+
+DEFAULT_CYCLES_COUNT = 3
+DEFAULT_SOAK_DURATION_MINUTES = 15
+
 # --- Attributs des sensors ---
 ATTR_CROP_TYPE = "crop_type"
 ATTR_STAGE = "stage"
@@ -96,6 +116,14 @@ ATTR_VIA_DEVICE = "via_device"
 ATTR_PRECIPITATION_MM = "precipitation_mm"
 ATTR_EFFECTIVE_RAINFALL_MM = "effective_rainfall_mm"
 ATTR_ETC_LITERS = "etc_liters"
+ATTR_NET_LITERS = "net_liters"
+ATTR_WATERING_APPLIED_TODAY_LITERS = "watering_applied_today_liters"
+ATTR_CUMULATIVE_NEED_LITERS = "cumulative_need_liters"
+ATTR_RECOMMENDED_DURATION_MINUTES = "recommended_duration_minutes"
+ATTR_IS_FRACTIONED = "is_fractioned"
+ATTR_CYCLES_COUNT = "cycles_count"
+ATTR_DURATION_PER_CYCLE_MINUTES = "duration_per_cycle_minutes"
+ATTR_SOAK_DURATION_MINUTES = "soak_duration_minutes"
 
 # --- Open-Meteo (ETo quotidien) ---
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
@@ -111,6 +139,9 @@ KC_CACHE_KEY = f"{DOMAIN}_kc_data"
 
 # --- Flag interne : mise à jour d'un champ sans rechargement complet ---
 OPTIONS_FIELD_UPDATE_FLAG = "_field_update"
+
+# --- Storage (ADR-008) ---
+STORAGE_VERSION = 1
 
 # --- Services ---
 SERVICE_RECALCULATE = "recalculate"

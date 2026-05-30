@@ -56,6 +56,7 @@ def compute_crop_result(
     precipitation_mm: float,
     crop_type: str,
     stage: str,
+    watering_applied_today_liters: float = 0.0,
 ) -> CropResult:
     """Calcule tous les indicateurs pour une culture en un appel.
 
@@ -65,6 +66,7 @@ def compute_crop_result(
     etc_liters = compute_etc_liters(kc, eto_mm, surface_m2)
     effective_rainfall_mm = compute_effective_rainfall_mm(precipitation_mm)
     net_liters = compute_net_liters(etc_liters, effective_rainfall_mm, surface_m2)
+    daily_need_liters = max(0.0, net_liters - watering_applied_today_liters)
     return CropResult(
         liters=round(net_liters, 1),
         etc_liters=round(etc_liters, 1),
@@ -78,6 +80,8 @@ def compute_crop_result(
         stage=stage,
         nb_plants=nb_plants,
         density=density,
+        watering_applied_today_liters=round(watering_applied_today_liters, 1),
+        daily_need_liters=round(daily_need_liters, 1),
     )
 
 
@@ -88,6 +92,8 @@ def compute_irrigation_data(
     precipitation_mm: float = 0.0,
     *,
     kc_getter,  # callable(kc_data, crop_type, stage) -> float | None
+    watering_applied_today: dict[str, float] | None = None,
+    cumulative_need: dict[str, float] | None = None,
 ) -> IrrigationData:
     """Calcule IrrigationData pour toutes les cultures d'un potager.
 
@@ -95,19 +101,24 @@ def compute_irrigation_data(
     Appelé par le coordinator, testable sans HA.
 
     Args:
-        crops:             liste de dicts (CONF_CROP_ID, CONF_CROP_TYPE, CONF_STAGE,
-                           CONF_NB_PLANTS, CONF_DENSITY) — structure Options HA
-        kc_data:           dict brut du kc_fao56.json
-        eto_mm:            valeur ETo du jour (mm/j)
-        precipitation_mm:  précipitations brutes du jour (mm) — ADR-007
-        kc_getter:         fonction d'accès au Kc (injectable pour les tests)
+        crops:                   liste de dicts (CONF_CROP_ID, CONF_CROP_TYPE, CONF_STAGE,
+                                 CONF_NB_PLANTS, CONF_DENSITY) — structure Options HA
+        kc_data:                 dict brut du kc_fao56.json
+        eto_mm:                  valeur ETo du jour (mm/j)
+        precipitation_mm:        précipitations brutes du jour (mm) — ADR-007
+        kc_getter:               fonction d'accès au Kc (injectable pour les tests)
+        watering_applied_today:  crop_id → litres arrosés aujourd'hui (ADR-009)
+        cumulative_need:         crop_id → bilan cumulé persisté (ADR-008)
     """
     from .kc_data import get_kc as _default_getter  # import local pour éviter la circularité
 
     _get_kc = kc_getter if kc_getter is not None else _default_getter
+    _watering = watering_applied_today or {}
+    _cumulative = cumulative_need or {}
 
     results: dict[str, CropResult] = {}
     total = 0.0
+    total_daily_need = 0.0
 
     for crop in crops:
         crop_id: str = crop["crop_id"]
@@ -128,13 +139,17 @@ def compute_irrigation_data(
             precipitation_mm=precipitation_mm,
             crop_type=crop_type,
             stage=stage,
+            watering_applied_today_liters=_watering.get(crop_id, 0.0),
         )
         results[crop_id] = result
         total += result.liters
+        total_daily_need += result.daily_need_liters
 
     return IrrigationData(
         crops=results,
         total_liters=round(total, 1),
+        total_daily_need_liters=round(total_daily_need, 1),
         eto_mm=eto_mm,
         precipitation_mm=precipitation_mm,
+        cumulative_need=dict(_cumulative),
     )
