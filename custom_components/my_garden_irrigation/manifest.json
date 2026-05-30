@@ -5,7 +5,7 @@
   "config_flow": true,
   "documentation": "https://github.com/CorentinBarban/My-Garden-Irrigation",
   "integration_type": "service",
-  "iot_class": "local_push",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/CorentinBarban/My-Garden-Irrigation/issues",
   "quality_scale": "silver",
   "requirements": [],

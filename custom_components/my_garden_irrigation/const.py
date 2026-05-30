@@ -6,9 +6,9 @@ ATTRIBUTION = "Données Kc : FAO Irrigation and Drainage Paper 56"
 
 # --- Config / Options entry keys ---
 CONF_NAME = "name"
-CONF_ETO_ENTITY_ID = "eto_entity_id"
 CONF_CROPS = "crops"
 CONF_CROP_ID = "crop_id"
+CONF_CROP_NAME = "crop_name"
 CONF_CROP_TYPE = "crop_type"
 CONF_STAGE = "stage"
 CONF_NB_PLANTS = "nb_plants"
@@ -52,6 +52,11 @@ ATTR_KC = "kc"
 ATTR_ETO_MM = "eto_mm"
 ATTR_LITERS_PER_PLANT = "liters_per_plant"
 ATTR_WEEKLY_PROJECTION_L = "weekly_projection_l"
+ATTR_VIA_DEVICE = "via_device"
+
+# --- Open-Meteo (ETo quotidien) ---
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_TIMEOUT = 10  # secondes
 
 # --- Données Kc distantes (ADR-001) ---
 KC_REMOTE_URL = (

@@ -1,27 +1,25 @@
-"""Coordinateur de données — My Garden Irrigation (ADR-005).
+"""Coordinateur de données — My Garden Irrigation.
 
-Pattern : DataUpdateCoordinator sans SCAN_INTERVAL.
-La mise à jour est déclenchée par les changements d'état de l'entité ETo
-(async_track_state_change_event), et non par un polling périodique.
-
-Ce module est la couture entre Home Assistant (I/O, états, événements)
-et le package core/ (logique métier pure).
+L'ETo est récupéré depuis l'API Open-Meteo (gratuite, sans clé API) en utilisant
+la latitude/longitude configurée dans Home Assistant (hass.config).
+La mise à jour se fait toutes les heures via SCAN_INTERVAL.
 """
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     CONF_CROPS,
-    CONF_ETO_ENTITY_ID,
     DOMAIN,
     MAX_REASONABLE_SURFACE_M2,
+    OPEN_METEO_TIMEOUT,
+    OPEN_METEO_URL,
 )
 from .core.calculations import compute_irrigation_data
 from .core.kc_data import get_kc
@@ -30,27 +28,24 @@ from .kc_loader import async_load_kc_data
 
 _LOGGER = logging.getLogger(__name__)
 
+SCAN_INTERVAL = timedelta(hours=1)
+
 
 class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     """Calcule les besoins en eau de toutes les cultures configurées.
 
+    L'ETo est obtenu depuis Open-Meteo à partir des coordonnées HA.
     Délègue la logique métier à core.calculations.compute_irrigation_data.
-    Gère uniquement les interactions HA : lecture d'états, événements, I/O async.
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN)
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=SCAN_INTERVAL)
         self._entry = entry
         self._kc_data: dict = {}
-        self._unsubscribe_eto: callable | None = None
 
     # ------------------------------------------------------------------
     # Propriétés HA
     # ------------------------------------------------------------------
-
-    @property
-    def eto_entity_id(self) -> str:
-        return self._entry.options[CONF_ETO_ENTITY_ID]
 
     @property
     def crops(self) -> list[dict]:
@@ -61,58 +56,63 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     # ------------------------------------------------------------------
 
     async def async_setup(self) -> None:
-        """Charge les données Kc et s'abonne aux changements de l'entité ETo."""
+        """Charge les données Kc et effectue le premier calcul."""
         self._kc_data = await async_load_kc_data(self.hass)
-        self._subscribe_eto()
         await self.async_config_entry_first_refresh()
-
-    def _subscribe_eto(self) -> None:
-        if self._unsubscribe_eto is not None:
-            self._unsubscribe_eto()
-
-        @callback
-        def _on_eto_state_changed(_event) -> None:
-            self.hass.async_create_task(self.async_request_refresh())
-
-        self._unsubscribe_eto = async_track_state_change_event(
-            self.hass, self.eto_entity_id, _on_eto_state_changed
-        )
-        _LOGGER.debug("Abonné aux changements de %s", self.eto_entity_id)
-
-    def async_unsubscribe(self) -> None:
-        """Désabonne l'écouteur ETo (appelé lors du déchargement de l'entrée)."""
-        if self._unsubscribe_eto is not None:
-            self._unsubscribe_eto()
-            self._unsubscribe_eto = None
 
     # ------------------------------------------------------------------
     # Calcul principal — pont HA → core/
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> IrrigationData:
-        """Lit l'ETo depuis HA, délègue le calcul ETc à core/calculations."""
-        eto_state = self.hass.states.get(self.eto_entity_id)
-
-        if eto_state is None or eto_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            raise UpdateFailed(
-                f"L'entité ETo '{self.eto_entity_id}' est indisponible."
-            )
-
-        try:
-            eto_mm = float(eto_state.state)
-        except ValueError as exc:
-            raise UpdateFailed(
-                f"Valeur ETo invalide : {eto_state.state!r}"
-            ) from exc
-
+        """Récupère l'ETo depuis Open-Meteo et calcule les besoins en eau."""
+        eto_mm = await self._fetch_eto()
         self._warn_unreasonable_surfaces(eto_mm)
-
         return compute_irrigation_data(
             crops=self.crops,
             kc_data=self._kc_data,
             eto_mm=eto_mm,
             kc_getter=get_kc,
         )
+
+    async def _fetch_eto(self) -> float:
+        """Appelle Open-Meteo pour obtenir l'ETo du jour (mm/j) via les coordonnées HA."""
+        lat = self.hass.config.latitude
+        lon = self.hass.config.longitude
+        _LOGGER.debug("Récupération ETo Open-Meteo (lat=%s, lon=%s)", lat, lon)
+
+        session = async_get_clientsession(self.hass)
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "et0_fao_evapotranspiration",
+            "timezone": "auto",
+            "forecast_days": 1,
+        }
+
+        try:
+            async with session.get(
+                OPEN_METEO_URL, params=params, timeout=OPEN_METEO_TIMEOUT
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json(content_type=None)
+        except Exception as exc:
+            raise UpdateFailed(
+                f"Erreur Open-Meteo (lat={lat}, lon={lon}) : {exc}"
+            ) from exc
+
+        try:
+            eto_mm = data["daily"]["et0_fao_evapotranspiration"][0]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise UpdateFailed(
+                f"Réponse Open-Meteo invalide : {data!r}"
+            ) from exc
+
+        if eto_mm is None:
+            raise UpdateFailed("L'ETo retourné par Open-Meteo est None.")
+
+        _LOGGER.debug("ETo Open-Meteo = %.2f mm/j", float(eto_mm))
+        return float(eto_mm)
 
     def _warn_unreasonable_surfaces(self, _eto_mm: float) -> None:
         """Log un avertissement si une culture a une surface anormalement grande."""
