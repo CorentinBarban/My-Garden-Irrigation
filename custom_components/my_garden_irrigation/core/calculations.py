@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from .models import CropResult, IrrigationData
 
+EFFECTIVE_RAINFALL_FACTOR = 0.8
+"""Part des précipitations brutes retenue par le sol (ADR-007)."""
+
 
 def compute_surface_m2(nb_plants: int, density: float) -> float:
     """Surface occupée en m² : nb_plants ÷ densité (plants/m²).
@@ -17,12 +20,31 @@ def compute_surface_m2(nb_plants: int, density: float) -> float:
 
 
 def compute_etc_liters(kc: float, eto_mm: float, surface_m2: float) -> float:
-    """Besoin en eau journalier en litres.
+    """Besoin en eau journalier brut en litres.
 
     ETc (mm/j) = Kc × ETo (mm/j)
     ETc (L/j)  = ETc (mm/j) × surface (m²)   ← 1 mm sur 1 m² = 1 L
     """
     return kc * eto_mm * surface_m2
+
+
+def compute_effective_rainfall_mm(precipitation_mm: float) -> float:
+    """Pluie efficace (mm) = précipitations brutes × 0,8 (ADR-007).
+
+    Le facteur 0,8 exclut le ruissellement et l'évaporation directe.
+    """
+    return precipitation_mm * EFFECTIVE_RAINFALL_FACTOR
+
+
+def compute_net_liters(etc_liters: float, effective_rainfall_mm: float, surface_m2: float) -> float:
+    """Besoin net en litres après déduction de la pluie efficace (ADR-007).
+
+    Besoin Net (mm) = max(0, ETc_mm − Pluie Efficace_mm)
+    Converti en litres : × surface_m2
+    """
+    etc_mm = etc_liters / surface_m2 if surface_m2 else 0.0
+    net_mm = max(0.0, etc_mm - effective_rainfall_mm)
+    return net_mm * surface_m2
 
 
 def compute_crop_result(
@@ -31,6 +53,7 @@ def compute_crop_result(
     density: float,
     kc: float,
     eto_mm: float,
+    precipitation_mm: float,
     crop_type: str,
     stage: str,
 ) -> CropResult:
@@ -39,14 +62,18 @@ def compute_crop_result(
     Paramètres nommés obligatoires pour éviter les erreurs d'ordre.
     """
     surface_m2 = compute_surface_m2(nb_plants, density)
-    liters = compute_etc_liters(kc, eto_mm, surface_m2)
+    etc_liters = compute_etc_liters(kc, eto_mm, surface_m2)
+    effective_rainfall_mm = compute_effective_rainfall_mm(precipitation_mm)
+    net_liters = compute_net_liters(etc_liters, effective_rainfall_mm, surface_m2)
     return CropResult(
-        liters=round(liters, 1),
+        liters=round(net_liters, 1),
+        etc_liters=round(etc_liters, 1),
+        effective_rainfall_mm=round(effective_rainfall_mm, 2),
         surface_m2=round(surface_m2, 2),
         kc=kc,
         eto_mm=eto_mm,
-        liters_per_plant=round(liters / nb_plants, 2) if nb_plants else 0.0,
-        weekly_projection_l=round(liters * 7, 1),
+        liters_per_plant=round(net_liters / nb_plants, 2) if nb_plants else 0.0,
+        weekly_projection_l=round(net_liters * 7, 1),
         crop_type=crop_type,
         stage=stage,
         nb_plants=nb_plants,
@@ -58,6 +85,7 @@ def compute_irrigation_data(
     crops: list[dict],
     kc_data: dict,
     eto_mm: float,
+    precipitation_mm: float = 0.0,
     *,
     kc_getter,  # callable(kc_data, crop_type, stage) -> float | None
 ) -> IrrigationData:
@@ -67,11 +95,12 @@ def compute_irrigation_data(
     Appelé par le coordinator, testable sans HA.
 
     Args:
-        crops:      liste de dicts (CONF_CROP_ID, CONF_CROP_TYPE, CONF_STAGE,
-                    CONF_NB_PLANTS, CONF_DENSITY) — structure Options HA
-        kc_data:    dict brut du kc_fao56.json
-        eto_mm:     valeur ETo du jour (mm/j)
-        kc_getter:  fonction d'accès au Kc (injectable pour les tests)
+        crops:             liste de dicts (CONF_CROP_ID, CONF_CROP_TYPE, CONF_STAGE,
+                           CONF_NB_PLANTS, CONF_DENSITY) — structure Options HA
+        kc_data:           dict brut du kc_fao56.json
+        eto_mm:            valeur ETo du jour (mm/j)
+        precipitation_mm:  précipitations brutes du jour (mm) — ADR-007
+        kc_getter:         fonction d'accès au Kc (injectable pour les tests)
     """
     from .kc_data import get_kc as _default_getter  # import local pour éviter la circularité
 
@@ -96,10 +125,16 @@ def compute_irrigation_data(
             density=density,
             kc=kc,
             eto_mm=eto_mm,
+            precipitation_mm=precipitation_mm,
             crop_type=crop_type,
             stage=stage,
         )
         results[crop_id] = result
         total += result.liters
 
-    return IrrigationData(crops=results, total_liters=round(total, 1), eto_mm=eto_mm)
+    return IrrigationData(
+        crops=results,
+        total_liters=round(total, 1),
+        eto_mm=eto_mm,
+        precipitation_mm=precipitation_mm,
+    )

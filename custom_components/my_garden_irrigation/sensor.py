@@ -12,10 +12,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_CROP_TYPE,
     ATTR_DENSITY,
+    ATTR_EFFECTIVE_RAINFALL_MM,
+    ATTR_ETC_LITERS,
     ATTR_ETO_MM,
     ATTR_KC,
     ATTR_LITERS_PER_PLANT,
     ATTR_NB_PLANTS,
+    ATTR_PRECIPITATION_MM,
     ATTR_STAGE,
     ATTR_SURFACE_M2,
     ATTR_VIA_DEVICE,
@@ -44,6 +47,7 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         TotalIrrigationSensor(coordinator, entry),
         EToSensor(coordinator, entry),
+        PrecipitationSensor(coordinator, entry),
     ]
     for crop in entry.options.get(CONF_CROPS, []):
         entities.append(CropIrrigationSensor(coordinator, entry, crop))
@@ -121,6 +125,8 @@ class CropIrrigationSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntit
             ATTR_SURFACE_M2: result.surface_m2,
             ATTR_KC: result.kc,
             ATTR_ETO_MM: result.eto_mm,
+            ATTR_ETC_LITERS: result.etc_liters,
+            ATTR_EFFECTIVE_RAINFALL_MM: result.effective_rainfall_mm,
             ATTR_LITERS_PER_PLANT: result.liters_per_plant,
             ATTR_WEEKLY_PROJECTION_L: result.weekly_projection_l,
             ATTR_VIA_DEVICE: self._entry_id,
@@ -217,3 +223,38 @@ class TotalIrrigationSensor(CoordinatorEntity[IrrigationCoordinator], SensorEnti
     def native_value(self) -> float | None:
         data: IrrigationData | None = self.coordinator.data
         return data.total_liters if data else None
+
+
+class PrecipitationSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity):
+    """Précipitations brutes du jour (mm) — source Open-Meteo."""
+
+    _attr_device_class = SensorDeviceClass.PRECIPITATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPrecipitationDepth.MILLIMETERS
+    _attr_suggested_display_precision = 1
+    _attr_has_entity_name = True
+    _attr_attribution = ATTRIBUTION
+    _attr_icon = "mdi:weather-rainy"
+
+    def __init__(
+        self, coordinator: IrrigationCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_precipitation"
+        self._attr_name = "Précipitations"
+        self._attr_device_info = _centrale_device_info(entry)
+
+    @property
+    def native_value(self) -> float | None:
+        data: IrrigationData | None = self.coordinator.data
+        return data.precipitation_mm if data else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data: IrrigationData | None = self.coordinator.data
+        if data is None:
+            return {}
+        from .core.calculations import compute_effective_rainfall_mm
+        return {
+            ATTR_EFFECTIVE_RAINFALL_MM: round(compute_effective_rainfall_mm(data.precipitation_mm), 2),
+        }

@@ -65,27 +65,28 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> IrrigationData:
-        """Récupère l'ETo depuis Open-Meteo et calcule les besoins en eau."""
-        eto_mm = await self._fetch_eto()
+        """Récupère ETo et précipitations depuis Open-Meteo et calcule les besoins nets."""
+        eto_mm, precipitation_mm = await self._fetch_weather()
         self._warn_unreasonable_surfaces(eto_mm)
         return compute_irrigation_data(
             crops=self.crops,
             kc_data=self._kc_data,
             eto_mm=eto_mm,
+            precipitation_mm=precipitation_mm,
             kc_getter=get_kc,
         )
 
-    async def _fetch_eto(self) -> float:
-        """Appelle Open-Meteo pour obtenir l'ETo du jour (mm/j) via les coordonnées HA."""
+    async def _fetch_weather(self) -> tuple[float, float]:
+        """Appelle Open-Meteo pour obtenir l'ETo et les précipitations du jour."""
         lat = self.hass.config.latitude
         lon = self.hass.config.longitude
-        _LOGGER.debug("Récupération ETo Open-Meteo (lat=%s, lon=%s)", lat, lon)
+        _LOGGER.debug("Récupération météo Open-Meteo (lat=%s, lon=%s)", lat, lon)
 
         session = async_get_clientsession(self.hass)
         params = {
             "latitude": lat,
             "longitude": lon,
-            "daily": "et0_fao_evapotranspiration_sum",
+            "daily": "et0_fao_evapotranspiration_sum,precipitation_sum",
             "timezone": "auto",
             "forecast_days": 1,
         }
@@ -102,7 +103,9 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             ) from exc
 
         try:
-            eto_mm = data["daily"]["et0_fao_evapotranspiration_sum"][0]
+            daily = data["daily"]
+            eto_mm = daily["et0_fao_evapotranspiration_sum"][0]
+            precipitation_mm = daily["precipitation_sum"][0]
         except (KeyError, IndexError, TypeError) as exc:
             raise UpdateFailed(
                 f"Réponse Open-Meteo invalide : {data!r}"
@@ -111,8 +114,13 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         if eto_mm is None:
             raise UpdateFailed("L'ETo retourné par Open-Meteo est None.")
 
-        _LOGGER.debug("ETo Open-Meteo = %.2f mm/j", float(eto_mm))
-        return float(eto_mm)
+        precipitation_mm = float(precipitation_mm) if precipitation_mm is not None else 0.0
+        _LOGGER.debug(
+            "Open-Meteo — ETo=%.2f mm/j, précipitations=%.2f mm",
+            float(eto_mm),
+            precipitation_mm,
+        )
+        return float(eto_mm), precipitation_mm
 
     def _warn_unreasonable_surfaces(self, _eto_mm: float) -> None:
         """Log un avertissement si une culture a une surface anormalement grande."""

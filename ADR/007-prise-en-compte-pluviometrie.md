@@ -1,8 +1,8 @@
 # 007 — Prise en compte de la pluviométrie (précipitations réelles et effectives)
 
 **Date** : 2026-05-30  
-**Statut** : Proposé  
-**Décideurs** : Expert Home Assistant / Équipe projet  
+**Statut** : Accepté  
+**Décideurs** : Expert Home Assistant / Équipe projet
 
 ---
 
@@ -37,4 +37,3 @@ Un système d'irrigation moderne et éco-responsable se doit de déduire l'eau g
 ## Conséquences
 
 - **Positives** : économies d'eau massives automatisées dès qu'il pleut ; besoin net toujours ≥ 0 (jamais d'arrosage négatif absurde).
-- **Négatives** : l'ETo Open-Meteo combiné aux pluies prévues/réelles d'une API cloud peut parfois manquer de précision ultra-locale par rapport à un pluviomètre physique connecté — ce qui renforce l'intérêt de l'ADR 007 sur les providers locaux.

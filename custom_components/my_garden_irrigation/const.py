@@ -93,6 +93,9 @@ ATTR_ETO_MM = "eto_mm"
 ATTR_LITERS_PER_PLANT = "liters_per_plant"
 ATTR_WEEKLY_PROJECTION_L = "weekly_projection_l"
 ATTR_VIA_DEVICE = "via_device"
+ATTR_PRECIPITATION_MM = "precipitation_mm"
+ATTR_EFFECTIVE_RAINFALL_MM = "effective_rainfall_mm"
+ATTR_ETC_LITERS = "etc_liters"
 
 # --- Open-Meteo (ETo quotidien) ---
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"

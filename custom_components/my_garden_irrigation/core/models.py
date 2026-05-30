@@ -18,7 +18,13 @@ class CropResult:
     """Besoin en eau calculé pour une culture à un instant donné."""
 
     liters: float
-    """Litres/jour pour cette culture."""
+    """Litres/jour nets (après déduction de la pluie efficace)."""
+
+    etc_liters: float
+    """Litres/jour bruts ETc avant déduction de la pluie (Kc × ETo × surface)."""
+
+    effective_rainfall_mm: float
+    """Pluie efficace du jour (mm) = précipitations × 0,8."""
 
     surface_m2: float
     """Surface occupée en m² (nb_plants ÷ densité)."""
@@ -30,10 +36,10 @@ class CropResult:
     """ETo source utilisée (mm/j)."""
 
     liters_per_plant: float
-    """Litres/jour par plant."""
+    """Litres/jour nets par plant."""
 
     weekly_projection_l: float
-    """Projection hebdomadaire (litres × 7)."""
+    """Projection hebdomadaire nette (litres nets × 7)."""
 
     # Métadonnées de la culture — utiles pour les attributs HA
     crop_type: str
@@ -50,10 +56,13 @@ class IrrigationData:
     """crop_id → CropResult pour chaque culture configurée."""
 
     total_liters: float = 0.0
-    """Somme de toutes les cultures (litres/jour)."""
+    """Somme nette de toutes les cultures (litres/jour)."""
 
     eto_mm: float = 0.0
     """ETo du jour utilisée pour tous les calculs (mm/j)."""
+
+    precipitation_mm: float = 0.0
+    """Précipitations brutes du jour (mm) — source Open-Meteo."""
 
 
 # ---------------------------------------------------------------------------
