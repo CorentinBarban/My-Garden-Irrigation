@@ -102,4 +102,4 @@ def compute_irrigation_data(
         results[crop_id] = result
         total += result.liters
 
-    return IrrigationData(crops=results, total_liters=round(total, 1))
+    return IrrigationData(crops=results, total_liters=round(total, 1), eto_mm=eto_mm)

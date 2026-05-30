@@ -52,6 +52,9 @@ class IrrigationData:
     total_liters: float = 0.0
     """Somme de toutes les cultures (litres/jour)."""
 
+    eto_mm: float = 0.0
+    """ETo du jour utilisée pour tous les calculs (mm/j)."""
+
 
 # ---------------------------------------------------------------------------
 # Entrées pour le calcul ETo
