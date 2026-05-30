@@ -25,7 +25,8 @@
           "add_crop": "Ajouter une culture",
           "remove_crop": "Supprimer une culture",
           "valve_config": "Configurer la vanne globale",
-          "watering_config": "Fréquence et mode d'arrosage"
+          "watering_config": "Fréquence et mode d'arrosage",
+          "auto_irrigation": "Arrosage automatique"
         }
       },
       "add_crop": {
@@ -72,6 +73,16 @@
           "watering_interval_days": "Utilisé uniquement si la fréquence est « Intervalle fixe ».",
           "watering_mode": "En mode Fractionné, la consigne est découpée en cycles pour favoriser l'infiltration."
         }
+      },
+      "auto_irrigation": {
+        "title": "Arrosage automatique",
+        "description": "Définissez l'heure à laquelle la centrale déclenchera automatiquement l'arrosage. Activez ensuite le switch « Arrosage automatique » sur la centrale pour l'activer.",
+        "data": {
+          "irrigation_time": "Heure de déclenchement"
+        },
+        "data_description": {
+          "irrigation_time": "La séquence d'arrosage sera lancée à cette heure chaque jour (ou selon l'intervalle configuré)."
+        }
       }
     },
     "abort": {
@@ -79,6 +90,50 @@
     }
   },
   "entity": {
+    "sensor": {
+      "irrigation": {
+        "name": "Irrigation"
+      },
+      "cumulative_need": {
+        "name": "Besoin cumulé"
+      },
+      "kc": {
+        "name": "Kc"
+      },
+      "eto": {
+        "name": "ETo"
+      },
+      "total_daily": {
+        "name": "Besoin journalier"
+      },
+      "total_cumulative": {
+        "name": "Besoin cumulé"
+      },
+      "precipitation_daily": {
+        "name": "Précipitations journalières"
+      },
+      "next_watering": {
+        "name": "Prochain arrosage"
+      }
+    },
+    "button": {
+      "reset_irrigation": {
+        "name": "Réinitialiser l'irrigation"
+      },
+      "start_irrigation_now": {
+        "name": "Lancer l'arrosage maintenant"
+      }
+    },
+    "switch": {
+      "auto_irrigation": {
+        "name": "Arrosage automatique"
+      }
+    },
+    "time": {
+      "irrigation_time": {
+        "name": "Heure d'arrosage"
+      }
+    },
     "number": {
       "nb_plants": {
         "name": "Nombre de plants"

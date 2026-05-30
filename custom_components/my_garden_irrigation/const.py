@@ -1,7 +1,7 @@
 """Constantes pour l'intégration My Garden Irrigation."""
 
 DOMAIN = "my_garden_irrigation"
-PLATFORMS = ["sensor", "number", "select"]
+PLATFORMS = ["sensor", "number", "select", "button", "switch", "time"]
 ATTRIBUTION = "Données Kc : FAO Irrigation and Drainage Paper 56"
 
 # --- Config / Options entry keys ---
@@ -136,6 +136,10 @@ KC_REMOTE_URL = (
 )
 KC_FETCH_TIMEOUT = 10  # secondes
 KC_CACHE_KEY = f"{DOMAIN}_kc_data"
+
+# --- Arrosage automatique (planifié par la centrale) ---
+CONF_IRRIGATION_TIME = "irrigation_time"
+DEFAULT_IRRIGATION_TIME = "06:00:00"
 
 # --- Flag interne : mise à jour d'un champ sans rechargement complet ---
 OPTIONS_FIELD_UPDATE_FLAG = "_field_update"

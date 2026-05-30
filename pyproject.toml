@@ -1,7 +1,5 @@
 [project]
 name = "my-garden-irrigation"
 version = "1.0.0"
-requires-python = ">=3.12"
-dependencies = [
-  "homeassistant",
-]
+requires-python = "==3.14.2"
+dependencies = ["homeassistant==2026.5.4"]

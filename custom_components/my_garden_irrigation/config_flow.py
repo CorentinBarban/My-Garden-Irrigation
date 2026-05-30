@@ -26,12 +26,14 @@ from .const import (
     CONF_DENSITY,
     CONF_GLOBAL_FLOW_RATE,
     CONF_GLOBAL_VALVE_ENTITY_ID,
+    CONF_IRRIGATION_TIME,
     CONF_NAME,
     CONF_NB_PLANTS,
     CONF_STAGE,
     CONF_WATERING_FREQUENCY,
     CONF_WATERING_INTERVAL_DAYS,
     CONF_WATERING_MODE,
+    DEFAULT_IRRIGATION_TIME,
     DOMAIN,
     FAO_DEFAULT_DENSITIES,
     STAGE_MID,
@@ -89,6 +91,7 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
         self._watering_frequency: str = entry.options.get(CONF_WATERING_FREQUENCY, WATERING_FREQUENCY_DAILY)
         self._watering_interval_days: int = entry.options.get(CONF_WATERING_INTERVAL_DAYS, 2)
         self._watering_mode: str = entry.options.get(CONF_WATERING_MODE, WATERING_MODE_CONTINUOUS)
+        self._irrigation_time: str = entry.options.get(CONF_IRRIGATION_TIME, DEFAULT_IRRIGATION_TIME)
 
     # ------------------------------------------------------------------
     # Menu principal
@@ -99,7 +102,7 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
     ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["add_crop", "remove_crop", "valve_config", "watering_config"],
+            menu_options=["add_crop", "remove_crop", "valve_config", "watering_config", "auto_irrigation"],
         )
 
     # ------------------------------------------------------------------
@@ -280,6 +283,28 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
         )
 
     # ------------------------------------------------------------------
+    # Heure d'arrosage automatique
+    # ------------------------------------------------------------------
+
+    async def async_step_auto_irrigation(
+        self, user_input: dict | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            self._irrigation_time = user_input.get(CONF_IRRIGATION_TIME, DEFAULT_IRRIGATION_TIME)
+            return self._save()
+
+        suggested: dict[str, Any] = {CONF_IRRIGATION_TIME: self._irrigation_time}
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_IRRIGATION_TIME): selector.TimeSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="auto_irrigation",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+        )
+
+    # ------------------------------------------------------------------
     # Persistance
     # ------------------------------------------------------------------
 
@@ -296,4 +321,5 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
             data[CONF_WATERING_INTERVAL_DAYS] = 1
         else:
             data[CONF_WATERING_INTERVAL_DAYS] = self._watering_interval_days
+        data[CONF_IRRIGATION_TIME] = self._irrigation_time
         return self.async_create_entry(data=data)

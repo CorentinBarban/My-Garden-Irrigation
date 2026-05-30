@@ -9,6 +9,7 @@ ADR-009 : vanne globale — écoute les changements d'état, calcule le volume d
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Callable
@@ -27,12 +28,21 @@ from .const import (
     CONF_DENSITY,
     CONF_GLOBAL_FLOW_RATE,
     CONF_GLOBAL_VALVE_ENTITY_ID,
+    CONF_IRRIGATION_TIME,
     CONF_NB_PLANTS,
+    CONF_WATERING_FREQUENCY,
+    CONF_WATERING_INTERVAL_DAYS,
+    CONF_WATERING_MODE,
+    DEFAULT_CYCLES_COUNT,
+    DEFAULT_IRRIGATION_TIME,
+    DEFAULT_SOAK_DURATION_MINUTES,
     DOMAIN,
     MAX_REASONABLE_SURFACE_M2,
     OPEN_METEO_TIMEOUT,
     OPEN_METEO_URL,
     STORAGE_VERSION,
+    WATERING_FREQUENCY_INTERVAL,
+    WATERING_MODE_FRACTIONED,
 )
 from .core.calculations import compute_irrigation_data, compute_surface_m2
 from .core.kc_data import get_kc
@@ -66,6 +76,11 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self._valve_open_time: datetime | None = None
         self._valve_listener_unsub: Callable | None = None
         self._midnight_unsub: Callable | None = None
+        # Arrosage automatique
+        self._auto_enabled: bool = False
+        self._last_auto_watering_date: str | None = None
+        self._auto_irrigation_unsub: Callable | None = None
+        self._irrigation_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Propriétés HA
@@ -96,9 +111,12 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             today = dt_util.now().date().isoformat()
             if stored_date == today:
                 self._watering_applied_today = stored.get("watering_applied_today", {})
+            self._auto_enabled = stored.get("auto_irrigation_enabled", False)
+            self._last_auto_watering_date = stored.get("last_auto_watering_date")
 
         self._setup_valve_listener()
         self._schedule_midnight_update()
+        self._setup_auto_irrigation()
 
         @callback
         def _cleanup() -> None:
@@ -106,10 +124,23 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
                 self._valve_listener_unsub()
             if self._midnight_unsub is not None:
                 self._midnight_unsub()
+            if self._auto_irrigation_unsub is not None:
+                self._auto_irrigation_unsub()
+            if self._irrigation_task and not self._irrigation_task.done():
+                self._irrigation_task.cancel()
 
         self._entry.async_on_unload(_cleanup)
 
         await self.async_config_entry_first_refresh()
+
+        # Amorçage du cumulé au premier démarrage (aucune donnée persistée).
+        # Sans ceci, le total cumulé resterait 0 jusqu'à minuit alors que les
+        # plantes ont déjà un besoin journalier calculé depuis l'ETo du jour.
+        if not self._cumulative_need and self.data is not None:
+            for crop_id, result in self.data.crops.items():
+                self._cumulative_need[crop_id] = result.daily_need_liters
+            await self._save_state()
+            await self.async_refresh()
 
     # ------------------------------------------------------------------
     # Vanne globale (ADR-009)
@@ -206,6 +237,162 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self._schedule_midnight_update()
 
     # ------------------------------------------------------------------
+    # Arrosage automatique
+    # ------------------------------------------------------------------
+
+    @property
+    def auto_irrigation_enabled(self) -> bool:
+        return self._auto_enabled
+
+    @property
+    def last_auto_watering_date(self) -> str | None:
+        return self._last_auto_watering_date
+
+    def _setup_auto_irrigation(self) -> None:
+        """Planifie (ou annule) le déclenchement quotidien de l'arrosage automatique."""
+        if self._auto_irrigation_unsub is not None:
+            self._auto_irrigation_unsub()
+            self._auto_irrigation_unsub = None
+
+        if not self._auto_enabled:
+            return
+
+        time_str: str = self._entry.options.get(CONF_IRRIGATION_TIME, DEFAULT_IRRIGATION_TIME)
+        try:
+            parts = time_str.split(":")
+            hour, minute = int(parts[0]), int(parts[1])
+        except (ValueError, AttributeError, IndexError):
+            hour, minute = 6, 0
+
+        now = dt_util.now()
+        next_trigger = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if next_trigger <= now:
+            next_trigger += timedelta(days=1)
+
+        self._auto_irrigation_unsub = async_track_point_in_time(
+            self.hass, self._handle_auto_irrigation, next_trigger
+        )
+        _LOGGER.debug("Arrosage automatique planifié à %s", next_trigger)
+
+    async def _handle_auto_irrigation(self, _now: datetime) -> None:
+        """Appelé à l'heure planifiée : vérifie les conditions puis lance la séquence."""
+        frequency: str = self._entry.options.get(CONF_WATERING_FREQUENCY, "daily")
+        if frequency == WATERING_FREQUENCY_INTERVAL:
+            interval_days: int = self._entry.options.get(CONF_WATERING_INTERVAL_DAYS, 2)
+            today = dt_util.now().date()
+            if self._last_auto_watering_date:
+                from datetime import date as _date
+                days_since = (today - _date.fromisoformat(self._last_auto_watering_date)).days
+                if days_since < interval_days:
+                    _LOGGER.debug(
+                        "Arrosage auto ignoré — intervalle %dj, dernier arrosage il y a %dj.",
+                        interval_days, days_since,
+                    )
+                    self._setup_auto_irrigation()
+                    return
+
+        await self.async_run_irrigation_sequence()
+        self._setup_auto_irrigation()
+
+    async def async_set_auto_irrigation(self, enabled: bool) -> None:
+        """Active ou désactive l'arrosage automatique depuis le switch HA."""
+        self._auto_enabled = enabled
+        await self._save_state()
+        self._setup_auto_irrigation()
+        await self.async_refresh()
+
+    async def async_run_irrigation_sequence(self) -> None:
+        """Lance la séquence d'arrosage (utilise le bilan cumulé de la centrale)."""
+        if self._irrigation_task and not self._irrigation_task.done():
+            _LOGGER.debug("Séquence d'arrosage déjà en cours.")
+            return
+        self._irrigation_task = self.hass.async_create_task(
+            self._irrigation_sequence_task(),
+            "my_garden_irrigation_sequence",
+        )
+
+    async def async_stop_irrigation(self) -> None:
+        """Annule la séquence en cours et ferme la vanne."""
+        if self._irrigation_task and not self._irrigation_task.done():
+            self._irrigation_task.cancel()
+            try:
+                await self._irrigation_task
+            except asyncio.CancelledError:
+                pass
+
+    async def _irrigation_sequence_task(self) -> None:
+        """Tâche asyncio : ouvre la vanne, attend, ferme — gère le mode fractionné."""
+        data = self.data
+        if data is None:
+            return
+
+        total_cumulative = sum(data.cumulative_need.values())
+        if total_cumulative <= 0:
+            _LOGGER.debug("Arrosage auto : besoin cumulé = 0 L — ignoré.")
+            return
+
+        flow_rate: float = self._entry.options.get(CONF_GLOBAL_FLOW_RATE, 0.0)
+        valve_id: str | None = self._entry.options.get(CONF_GLOBAL_VALVE_ENTITY_ID)
+        if not valve_id or flow_rate <= 0:
+            _LOGGER.warning(
+                "Arrosage auto : vanne ou débit non configuré (vanne=%s, débit=%.1f L/h).",
+                valve_id, flow_rate,
+            )
+            return
+
+        duration_s = (total_cumulative / flow_rate) * 3600
+        watering_mode: str = self._entry.options.get(CONF_WATERING_MODE, "continuous")
+
+        _LOGGER.info(
+            "Arrosage automatique démarré — besoin=%.1fL, durée=%.0fs, mode=%s.",
+            total_cumulative, duration_s, watering_mode,
+        )
+
+        async def _open() -> None:
+            await self.hass.services.async_call(
+                "homeassistant", "turn_on", {"entity_id": valve_id}, blocking=True
+            )
+
+        async def _close() -> None:
+            await self.hass.services.async_call(
+                "homeassistant", "turn_off", {"entity_id": valve_id}, blocking=True
+            )
+
+        try:
+            if watering_mode == WATERING_MODE_FRACTIONED:
+                cycle_s = duration_s / DEFAULT_CYCLES_COUNT
+                soak_s = DEFAULT_SOAK_DURATION_MINUTES * 60
+                for i in range(DEFAULT_CYCLES_COUNT):
+                    await _open()
+                    await asyncio.sleep(cycle_s)
+                    await _close()
+                    if i < DEFAULT_CYCLES_COUNT - 1:
+                        await asyncio.sleep(soak_s)
+            else:
+                await _open()
+                await asyncio.sleep(duration_s)
+                await _close()
+        except asyncio.CancelledError:
+            _LOGGER.info("Séquence d'arrosage annulée — fermeture de la vanne.")
+            await _close()
+            raise
+
+        self._last_auto_watering_date = dt_util.now().date().isoformat()
+        await self._save_state()
+        _LOGGER.info("Arrosage automatique terminé.")
+
+    # ------------------------------------------------------------------
+    # Reset manuel (bouton centrale)
+    # ------------------------------------------------------------------
+
+    async def async_reset_irrigation(self) -> None:
+        """Remet le bilan hydrique cumulé et les arrosages du jour à zéro."""
+        self._cumulative_need = {}
+        self._watering_applied_today = {}
+        await self._save_state()
+        await self.async_refresh()
+
+    # ------------------------------------------------------------------
     # Persistance (ADR-008)
     # ------------------------------------------------------------------
 
@@ -217,6 +404,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
                 "cumulative_need": self._cumulative_need,
                 "watering_applied_today": self._watering_applied_today,
                 "watering_date": dt_util.now().date().isoformat(),
+                "auto_irrigation_enabled": self._auto_enabled,
+                "last_auto_watering_date": self._last_auto_watering_date,
             }
         )
 
