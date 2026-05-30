@@ -1,7 +1,8 @@
 # 002 — Source de l'évapotranspiration de référence (ETo)
 
 **Date** : 2026-05-28  
-**Statut** : Accepté  
+**Révisé** : 2026-05-29  
+**Statut** : Accepté (révisé)  
 **Décideurs** : Équipe projet  
 
 ---
@@ -17,38 +18,39 @@ Le calcul `ETc = Kc × ETo` requiert une valeur d'ETo fiable et mise à jour quo
 
 ## Décision
 
-**Option 1 comme source principale, Option 2 comme source recommandée, Option 4 comme fallback.**
+~~**Option 1 comme source principale** — l'intégration consommait une entité HA choisie par l'utilisateur dans le Config Flow (`eto_entity_id`).~~
 
-L'intégration consomme n'importe quelle entité HA exposant une valeur en `mm` ou `mm/d`. L'utilisateur choisit sa source dans le Config Flow.
+**Option 2 — Appel direct à l'API Open-Meteo depuis l'intégration.**
 
-La documentation de l'intégration recommande de coupler avec l'intégration **Open-Meteo** (gratuite, sans clé API, couvre le monde entier), qui expose nativement un sensor ETo via Penman-Monteith.
+> **Révision v2** : l'option entité HA a été abandonnée et le champ `eto_entity_id` supprimé lors de la migration `entry.version 1 → 2`. Le coordinator (`IrrigationCoordinator._fetch_eto`) appelle directement Open-Meteo en utilisant les coordonnées GPS configurées dans Home Assistant (`hass.config.latitude` / `hass.config.longitude`).
 
-Endpoint Open-Meteo utilisé par l'intégration recommandée :
+Endpoint appelé par l'intégration :
 
 ```
 GET https://api.open-meteo.com/v1/forecast
-  ?latitude={lat}&longitude={lon}
+  ?latitude={hass.config.latitude}
+  &longitude={hass.config.longitude}
   &daily=et0_fao_evapotranspiration
   &timezone=auto
   &forecast_days=1
 ```
 
-En dernier recours, un `input_number.eto_manuel` peut être créé par l'utilisateur comme source de fallback.
-
 ## Justification
 
-| Critère                        | Entité HA ✅ | Open-Meteo direct | Calcul interne | Valeur fixe |
-|-------------------------------|-------------|-------------------|----------------|-------------|
-| Flexibilité (station locale…) | ✓           | ✗                 | ✓              | ✗           |
-| Précision                      | Variable    | Haute             | Haute          | Faible      |
-| Complexité d'implémentation   | Faible      | Moyenne           | Haute          | Faible      |
-| Dépendance externe dans le code | ✗         | ✓                 | ✗              | ✗           |
-| Gratuit / sans clé API        | —           | ✓                 | —              | —           |
+| Critère                        | Entité HA | Open-Meteo direct ✅ | Calcul interne | Valeur fixe |
+|-------------------------------|-----------|----------------------|----------------|-------------|
+| Flexibilité (station locale…) | ✓         | ✗                    | ✓              | ✗           |
+| Précision                      | Variable  | Haute (Penman-Monteith) | Haute       | Faible      |
+| Friction à l'installation     | Haute     | Nulle                | Haute          | Faible      |
+| Complexité d'implémentation   | Faible    | Moyenne              | Haute          | Faible      |
+| Dépendance externe dans le code | ✗       | ✓                    | ✗              | ✗           |
+| Gratuit / sans clé API        | —         | ✓                    | —              | —           |
 
-Déléguer la source ETo à une entité HA existante respecte le principe de responsabilité unique : l'intégration calcule les besoins hydriques, elle ne gère pas la météo. Cela la rend compatible avec toute station météo locale, API météo déjà configurée, ou même un sensor virtuel.
+L'approche entité HA imposait à l'utilisateur de configurer une intégration météo tierce avant d'installer celle-ci, créant une dépendance d'installation non triviale. L'appel direct à Open-Meteo élimine cette friction : aucune configuration supplémentaire n'est requise car les coordonnées GPS sont déjà présentes dans HA.
 
 ## Conséquences
 
-- **Positives** : aucune dépendance réseau dans le code de l'intégration, compatibilité maximale, pas de gestion d'API key.
-- **Négatives** : l'utilisateur doit configurer sa source ETo séparément — point de friction à l'installation documenté avec un guide pas-à-pas pour Open-Meteo.
-- **Comportement si entité indisponible** : les sensors passent en état `unavailable`. Aucun calcul erroné n'est exposé.
+- **Positives** : installation zéro-config (coordonnées HA suffisantes), ETo toujours cohérent avec Penman-Monteith FAO, pas de gestion d'API key.
+- **Négatives** : dépendance réseau externe dans le coordinator — si Open-Meteo est inaccessible, les sensors passent en `unavailable` jusqu'à la prochaine tentative.
+- **Comportement en erreur** : `UpdateFailed` levée, HA marque les sensors `unavailable`. Rétablissement automatique à la prochaine mise à jour (`SCAN_INTERVAL = 1 h`, voir ADR-005).
+- **Pas de support station locale** : un jardinier avec une station météo HA ne peut pas substituer ses données — accepté comme contrainte v1.
