@@ -23,7 +23,9 @@
         "title": "Gérer votre potager",
         "menu_options": {
           "add_crop": "Ajouter une culture",
-          "remove_crop": "Supprimer une culture"
+          "remove_crop": "Supprimer une culture",
+          "valve_config": "Configurer la vanne globale",
+          "watering_config": "Fréquence et mode d'arrosage"
         }
       },
       "add_crop": {
@@ -45,6 +47,31 @@
         "data": {
           "crop_id": "Culture à supprimer"
         }
+      },
+      "valve_config": {
+        "title": "Vanne globale du potager",
+        "description": "Sélectionnez l'entité vanne ou interrupteur qui alimente votre réseau d'arrosage, et renseignez le débit total de votre installation.",
+        "data": {
+          "global_valve_entity_id": "Entité vanne / interrupteur",
+          "global_flow_rate": "Débit de l'installation (L/h)"
+        },
+        "data_description": {
+          "global_valve_entity_id": "Laissez vide si vous ne souhaitez pas le suivi automatique des arrosages.",
+          "global_flow_rate": "Débit horaire total débité lorsque la vanne est ouverte."
+        }
+      },
+      "watering_config": {
+        "title": "Fréquence et mode d'arrosage",
+        "description": "Définissez la fréquence d'arrosage de votre potager et le mode de distribution de l'eau.",
+        "data": {
+          "watering_frequency": "Fréquence d'arrosage",
+          "watering_interval_days": "Intervalle entre deux arrosages",
+          "watering_mode": "Mode d'arrosage"
+        },
+        "data_description": {
+          "watering_interval_days": "Utilisé uniquement si la fréquence est « Intervalle fixe ».",
+          "watering_mode": "En mode Fractionné, la consigne est découpée en cycles pour favoriser l'infiltration."
+        }
       }
     },
     "abort": {
@@ -58,6 +85,12 @@
       },
       "density": {
         "name": "Densité (plants/m²)"
+      },
+      "global_flow_rate": {
+        "name": "Débit de l'installation"
+      },
+      "watering_interval_days": {
+        "name": "Intervalle entre arrosages"
       }
     },
     "select": {
@@ -67,6 +100,20 @@
           "ini": "Initial (semis / reprise)",
           "mid": "Mi-saison (plein développement)",
           "end": "Fin de saison (maturation)"
+        }
+      },
+      "watering_frequency": {
+        "name": "Fréquence d'arrosage",
+        "state": {
+          "daily": "Quotidien",
+          "interval": "Intervalle fixe de X jours"
+        }
+      },
+      "watering_mode": {
+        "name": "Mode d'arrosage",
+        "state": {
+          "continuous": "Continu",
+          "fractioned": "Intermittent / Fractionné"
         }
       }
     }
@@ -108,6 +155,18 @@
         "ini": "Initial (semis / reprise)",
         "mid": "Mi-saison (plein développement)",
         "end": "Fin de saison (maturation)"
+      }
+    },
+    "watering_frequency": {
+      "options": {
+        "daily": "Quotidien",
+        "interval": "Intervalle fixe de X jours"
+      }
+    },
+    "watering_mode": {
+      "options": {
+        "continuous": "Continu",
+        "fractioned": "Intermittent / Fractionné"
       }
     }
   }

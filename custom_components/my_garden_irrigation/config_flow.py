@@ -11,6 +11,7 @@ Options Flow (post-installation) :
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
@@ -23,14 +24,23 @@ from .const import (
     CONF_CROP_TYPE,
     CONF_CROPS,
     CONF_DENSITY,
+    CONF_GLOBAL_FLOW_RATE,
+    CONF_GLOBAL_VALVE_ENTITY_ID,
     CONF_NAME,
     CONF_NB_PLANTS,
     CONF_STAGE,
+    CONF_WATERING_FREQUENCY,
+    CONF_WATERING_INTERVAL_DAYS,
+    CONF_WATERING_MODE,
     DOMAIN,
     FAO_DEFAULT_DENSITIES,
     STAGE_MID,
     STAGES,
     SUPPORTED_CROPS,
+    WATERING_FREQUENCIES,
+    WATERING_FREQUENCY_DAILY,
+    WATERING_MODE_CONTINUOUS,
+    WATERING_MODES,
 )
 
 
@@ -70,10 +80,15 @@ class MyGardenIrrigationConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class IrrigationOptionsFlowHandler(OptionsFlow):
-    """Options Flow — gestion post-installation des cultures."""
+    """Options Flow — gestion post-installation des cultures et de la vanne globale."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._crops: list[dict] = list(entry.options.get(CONF_CROPS, []))
+        self._valve_entity_id: str | None = entry.options.get(CONF_GLOBAL_VALVE_ENTITY_ID)
+        self._flow_rate: float = entry.options.get(CONF_GLOBAL_FLOW_RATE, 0.0)
+        self._watering_frequency: str = entry.options.get(CONF_WATERING_FREQUENCY, WATERING_FREQUENCY_DAILY)
+        self._watering_interval_days: int = entry.options.get(CONF_WATERING_INTERVAL_DAYS, 2)
+        self._watering_mode: str = entry.options.get(CONF_WATERING_MODE, WATERING_MODE_CONTINUOUS)
 
     # ------------------------------------------------------------------
     # Menu principal
@@ -84,7 +99,7 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
     ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["add_crop", "remove_crop"],
+            menu_options=["add_crop", "remove_crop", "valve_config", "watering_config"],
         )
 
     # ------------------------------------------------------------------
@@ -145,6 +160,41 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
         )
 
     # ------------------------------------------------------------------
+    # Configurer la vanne globale (ADR-009)
+    # ------------------------------------------------------------------
+
+    async def async_step_valve_config(
+        self, user_input: dict | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            self._valve_entity_id = user_input.get(CONF_GLOBAL_VALVE_ENTITY_ID) or None
+            self._flow_rate = float(user_input.get(CONF_GLOBAL_FLOW_RATE) or 0.0)
+            return self._save()
+
+        suggested: dict[str, Any] = {}
+        if self._valve_entity_id:
+            suggested[CONF_GLOBAL_VALVE_ENTITY_ID] = self._valve_entity_id
+        if self._flow_rate:
+            suggested[CONF_GLOBAL_FLOW_RATE] = self._flow_rate
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_GLOBAL_VALVE_ENTITY_ID): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["valve", "switch"])
+                ),
+                vol.Optional(CONF_GLOBAL_FLOW_RATE): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0, max=10_000, step=0.1, mode="box", unit_of_measurement="L/h"
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="valve_config",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+        )
+
+    # ------------------------------------------------------------------
     # Supprimer une culture
     # ------------------------------------------------------------------
 
@@ -184,9 +234,66 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
         )
 
     # ------------------------------------------------------------------
+    # Configurer la fréquence et le mode d'arrosage (ADR-010)
+    # ------------------------------------------------------------------
+
+    async def async_step_watering_config(
+        self, user_input: dict | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            self._watering_frequency = user_input[CONF_WATERING_FREQUENCY]
+            self._watering_mode = user_input[CONF_WATERING_MODE]
+            interval = user_input.get(CONF_WATERING_INTERVAL_DAYS)
+            if interval is not None:
+                self._watering_interval_days = int(interval)
+            return self._save()
+
+        suggested: dict[str, Any] = {
+            CONF_WATERING_FREQUENCY: self._watering_frequency,
+            CONF_WATERING_MODE: self._watering_mode,
+            CONF_WATERING_INTERVAL_DAYS: self._watering_interval_days,
+        }
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_WATERING_FREQUENCY): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=WATERING_FREQUENCIES,
+                        translation_key="watering_frequency",
+                    )
+                ),
+                vol.Optional(CONF_WATERING_INTERVAL_DAYS): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=30, step=1, mode="box", unit_of_measurement="jours"
+                    )
+                ),
+                vol.Required(CONF_WATERING_MODE): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=WATERING_MODES,
+                        translation_key="watering_mode",
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="watering_config",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+        )
+
+    # ------------------------------------------------------------------
     # Persistance
     # ------------------------------------------------------------------
 
     def _save(self) -> ConfigFlowResult:
-        """Enregistre les options et déclenche le rechargement de l'entrée."""
-        return self.async_create_entry(data={CONF_CROPS: self._crops})
+        """Enregistre toutes les options et déclenche le rechargement de l'entrée."""
+        data: dict[str, Any] = {CONF_CROPS: self._crops}
+        if self._valve_entity_id:
+            data[CONF_GLOBAL_VALVE_ENTITY_ID] = self._valve_entity_id
+        if self._flow_rate > 0:
+            data[CONF_GLOBAL_FLOW_RATE] = self._flow_rate
+        data[CONF_WATERING_FREQUENCY] = self._watering_frequency
+        data[CONF_WATERING_MODE] = self._watering_mode
+        if self._watering_frequency == WATERING_FREQUENCY_DAILY:
+            data[CONF_WATERING_INTERVAL_DAYS] = 1
+        else:
+            data[CONF_WATERING_INTERVAL_DAYS] = self._watering_interval_days
+        return self.async_create_entry(data=data)
