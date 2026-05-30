@@ -1,14 +1,223 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "source": "FAO Irrigation and Drainage Paper 56, Table 12 (Allen et al., 1998)",
-  "updated": "2026-05-28",
+  "updated": "2026-05-30",
   "crops": {
-    "tomate":    { "ini": 0.60, "mid": 1.15, "end": 0.80, "density_default": 3 },
-    "carotte":   { "ini": 0.70, "mid": 1.05, "end": 0.95, "density_default": 60 },
-    "haricot":   { "ini": 0.50, "mid": 1.05, "end": 0.90, "density_default": 12 },
-    "poivron":   { "ini": 0.60, "mid": 1.05, "end": 0.90, "density_default": 3 },
-    "laitue":    { "ini": 0.70, "mid": 1.00, "end": 0.95, "density_default": 8 },
-    "courgette": { "ini": 0.50, "mid": 1.00, "end": 0.80, "density_default": 1 },
-    "oignon":    { "ini": 0.50, "mid": 1.05, "end": 0.75, "density_default": 25 }
+    "tomate": {
+      "ini": 0.6,
+      "mid": 1.15,
+      "end": 0.8,
+      "density_default": 3,
+      "density_min": 2,
+      "density_max": 4
+    },
+    "carotte": {
+      "ini": 0.7,
+      "mid": 1.05,
+      "end": 0.95,
+      "density_default": 60,
+      "density_min": 40,
+      "density_max": 80
+    },
+    "haricot_vert": {
+      "ini": 0.5,
+      "mid": 1.05,
+      "end": 0.9,
+      "density_default": 12,
+      "density_min": 8,
+      "density_max": 16
+    },
+    "poivron": {
+      "ini": 0.6,
+      "mid": 1.05,
+      "end": 0.9,
+      "density_default": 3,
+      "density_min": 2,
+      "density_max": 4
+    },
+    "laitue": {
+      "ini": 0.7,
+      "mid": 1.0,
+      "end": 0.95,
+      "density_default": 8,
+      "density_min": 6,
+      "density_max": 9
+    },
+    "courgette": {
+      "ini": 0.5,
+      "mid": 1.0,
+      "end": 0.8,
+      "density_default": 1,
+      "density_min": 1,
+      "density_max": 2
+    },
+    "oignon": {
+      "ini": 0.5,
+      "mid": 1.05,
+      "end": 0.75,
+      "density_default": 25,
+      "density_min": 20,
+      "density_max": 40
+    },
+    "pomme_de_terre": {
+      "ini": 0.5,
+      "mid": 1.15,
+      "end": 0.75,
+      "density_default": 5,
+      "density_min": 4,
+      "density_max": 6
+    },
+    "aubergine": {
+      "ini": 0.6,
+      "mid": 1.05,
+      "end": 0.9,
+      "density_default": 2,
+      "density_min": 1,
+      "density_max": 3
+    },
+    "concombre": {
+      "ini": 0.6,
+      "mid": 1.0,
+      "end": 0.75,
+      "density_default": 2,
+      "density_min": 1,
+      "density_max": 3
+    },
+    "melon": {
+      "ini": 0.5,
+      "mid": 1.05,
+      "end": 0.75,
+      "density_default": 1,
+      "density_min": 1,
+      "density_max": 2
+    },
+    "potiron": {
+      "ini": 0.5,
+      "mid": 1.0,
+      "end": 0.8,
+      "density_default": 1,
+      "density_min": 1,
+      "density_max": 2
+    },
+    "brocoli": {
+      "ini": 0.7,
+      "mid": 1.05,
+      "end": 0.95,
+      "density_default": 4,
+      "density_min": 3,
+      "density_max": 6
+    },
+    "chou_fleur": {
+      "ini": 0.7,
+      "mid": 1.05,
+      "end": 0.95,
+      "density_default": 4,
+      "density_min": 3,
+      "density_max": 6
+    },
+    "chou": {
+      "ini": 0.7,
+      "mid": 1.05,
+      "end": 0.95,
+      "density_default": 4,
+      "density_min": 3,
+      "density_max": 5
+    },
+    "epinard": {
+      "ini": 0.7,
+      "mid": 1.0,
+      "end": 0.95,
+      "density_default": 16,
+      "density_min": 12,
+      "density_max": 20
+    },
+    "celeri": {
+      "ini": 0.7,
+      "mid": 1.05,
+      "end": 1.0,
+      "density_default": 6,
+      "density_min": 4,
+      "density_max": 9
+    },
+    "ail": {
+      "ini": 0.7,
+      "mid": 1.0,
+      "end": 0.6,
+      "density_default": 20,
+      "density_min": 16,
+      "density_max": 25
+    },
+    "poireau": {
+      "ini": 0.6,
+      "mid": 1.1,
+      "end": 1.05,
+      "density_default": 10,
+      "density_min": 8,
+      "density_max": 12
+    },
+    "petits_pois": {
+      "ini": 0.5,
+      "mid": 1.15,
+      "end": 1.1,
+      "density_default": 20,
+      "density_min": 15,
+      "density_max": 25
+    },
+    "radis": {
+      "ini": 0.7,
+      "mid": 0.9,
+      "end": 0.85,
+      "density_default": 80,
+      "density_min": 50,
+      "density_max": 100
+    },
+    "betterave": {
+      "ini": 0.5,
+      "mid": 1.05,
+      "end": 0.95,
+      "density_default": 12,
+      "density_min": 8,
+      "density_max": 16
+    },
+    "asperge": {
+      "ini": 0.5,
+      "mid": 0.95,
+      "end": 0.3,
+      "density_default": 3,
+      "density_min": 2,
+      "density_max": 4
+    },
+    "artichaut": {
+      "ini": 0.5,
+      "mid": 1.0,
+      "end": 0.95,
+      "density_default": 1,
+      "density_min": 1,
+      "density_max": 2
+    },
+    "basilic": {
+      "ini": 0.6,
+      "mid": 1.0,
+      "end": 0.9,
+      "density_default": 9,
+      "density_min": 6,
+      "density_max": 12
+    },
+    "persil": {
+      "ini": 0.6,
+      "mid": 1.05,
+      "end": 1.0,
+      "density_default": 16,
+      "density_min": 12,
+      "density_max": 20
+    },
+    "fraise": {
+      "ini": 0.4,
+      "mid": 0.85,
+      "end": 0.75,
+      "density_default": 7,
+      "density_min": 5,
+      "density_max": 9
+    }
   }
 }
