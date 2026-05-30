@@ -1,13 +1,12 @@
-"""Config Flow et Options Flow — My Garden Irrigation (ADR-004).
+"""Config Flow et Options Flow — My Garden Irrigation.
 
 Config Flow (installation) :
-  step_user  → nom du potager + entité ETo source
+  step_user  → nom du potager
 
 Options Flow (post-installation) :
-  step_init  → menu principal (ajouter / supprimer une culture, changer ETo)
+  step_init        → menu principal (ajouter / supprimer une culture)
   step_add_crop    → formulaire d'ajout d'une culture
   step_remove_crop → sélection de la culture à supprimer
-  step_change_eto  → changement de l'entité ETo source
 """
 from __future__ import annotations
 
@@ -20,10 +19,10 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_CROP_ID,
+    CONF_CROP_NAME,
     CONF_CROP_TYPE,
     CONF_CROPS,
     CONF_DENSITY,
-    CONF_ETO_ENTITY_ID,
     CONF_NAME,
     CONF_NB_PLANTS,
     CONF_STAGE,
@@ -38,7 +37,7 @@ from .const import (
 class MyGardenIrrigationConfigFlow(ConfigFlow, domain=DOMAIN):
     """Config Flow — installation initiale de l'intégration."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict | None = None
@@ -55,22 +54,12 @@ class MyGardenIrrigationConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(
                     title=name,
                     data={CONF_NAME: name},
-                    options={
-                        CONF_ETO_ENTITY_ID: user_input[CONF_ETO_ENTITY_ID],
-                        CONF_CROPS: [],
-                    },
+                    options={CONF_CROPS: []},
                 )
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_NAME): str,
-                    vol.Required(CONF_ETO_ENTITY_ID): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain="sensor")
-                    ),
-                }
-            ),
+            data_schema=vol.Schema({vol.Required(CONF_NAME): str}),
             errors=errors,
         )
 
@@ -81,11 +70,10 @@ class MyGardenIrrigationConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class IrrigationOptionsFlowHandler(OptionsFlow):
-    """Options Flow — gestion post-installation des cultures et de la source ETo."""
+    """Options Flow — gestion post-installation des cultures."""
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._crops: list[dict] = list(entry.options.get(CONF_CROPS, []))
-        self._eto_entity_id: str = entry.options.get(CONF_ETO_ENTITY_ID, "")
 
     # ------------------------------------------------------------------
     # Menu principal
@@ -96,7 +84,7 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
     ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["add_crop", "remove_crop", "change_eto"],
+            menu_options=["add_crop", "remove_crop"],
         )
 
     # ------------------------------------------------------------------
@@ -111,6 +99,7 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
             self._crops.append(
                 {
                     CONF_CROP_ID: str(uuid.uuid4()),
+                    CONF_CROP_NAME: user_input[CONF_CROP_NAME].strip(),
                     CONF_CROP_TYPE: crop_type,
                     CONF_STAGE: user_input[CONF_STAGE],
                     CONF_NB_PLANTS: int(user_input[CONF_NB_PLANTS]),
@@ -123,6 +112,7 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
             step_id="add_crop",
             data_schema=vol.Schema(
                 {
+                    vol.Required(CONF_CROP_NAME): str,
                     vol.Required(CONF_CROP_TYPE): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=SUPPORTED_CROPS,
@@ -175,8 +165,8 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
             {
                 "value": c[CONF_CROP_ID],
                 "label": (
-                    f"{c[CONF_CROP_TYPE].capitalize()} "
-                    f"— stade {c[CONF_STAGE]} "
+                    f"{c.get(CONF_CROP_NAME, c[CONF_CROP_TYPE].capitalize())} "
+                    f"({c[CONF_CROP_TYPE]}) "
                     f"— {c[CONF_NB_PLANTS]} plant(s)"
                 ),
             }
@@ -194,38 +184,9 @@ class IrrigationOptionsFlowHandler(OptionsFlow):
         )
 
     # ------------------------------------------------------------------
-    # Changer la source ETo
-    # ------------------------------------------------------------------
-
-    async def async_step_change_eto(
-        self, user_input: dict | None = None
-    ) -> ConfigFlowResult:
-        if user_input is not None:
-            self._eto_entity_id = user_input[CONF_ETO_ENTITY_ID]
-            return self._save()
-
-        return self.async_show_form(
-            step_id="change_eto",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_ETO_ENTITY_ID, default=self._eto_entity_id
-                    ): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain="sensor")
-                    ),
-                }
-            ),
-        )
-
-    # ------------------------------------------------------------------
     # Persistance
     # ------------------------------------------------------------------
 
     def _save(self) -> ConfigFlowResult:
         """Enregistre les options et déclenche le rechargement de l'entrée."""
-        return self.async_create_entry(
-            data={
-                CONF_ETO_ENTITY_ID: self._eto_entity_id,
-                CONF_CROPS: self._crops,
-            }
-        )
+        return self.async_create_entry(data={CONF_CROPS: self._crops})
