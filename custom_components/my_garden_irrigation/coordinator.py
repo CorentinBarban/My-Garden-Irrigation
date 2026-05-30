@@ -85,7 +85,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         params = {
             "latitude": lat,
             "longitude": lon,
-            "daily": "et0_fao_evapotranspiration",
+            "daily": "et0_fao_evapotranspiration_sum",
             "timezone": "auto",
             "forecast_days": 1,
         }
@@ -102,7 +102,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             ) from exc
 
         try:
-            eto_mm = data["daily"]["et0_fao_evapotranspiration"][0]
+            eto_mm = data["daily"]["et0_fao_evapotranspiration_sum"][0]
         except (KeyError, IndexError, TypeError) as exc:
             raise UpdateFailed(
                 f"Réponse Open-Meteo invalide : {data!r}"
