@@ -1,7 +1,8 @@
 """Plateforme time — My Garden Irrigation.
 
-Utilise RestoreEntity pour persister l'heure d'arrosage sans écrire
-dans ConfigEntry.options (Module 1 du CDC de refactoring).
+IrrigationTimeEntity lit depuis le coordinateur (initialisé depuis entry.options).
+Pas de RestoreEntity : après un rechargement via le formulaire, entry.options
+fait autorité sur le dernier état HA.
 """
 from __future__ import annotations
 
@@ -11,14 +12,8 @@ from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import (
-    ATTRIBUTION,
-    CONF_IRRIGATION_TIME,
-    DEFAULT_IRRIGATION_TIME,
-    DOMAIN,
-)
+from .const import ATTRIBUTION, DOMAIN
 from .coordinator import IrrigationCoordinator
 from .sensor import _centrale_device_info
 
@@ -32,7 +27,7 @@ async def async_setup_entry(
     async_add_entities([IrrigationTimeEntity(coordinator, entry)])
 
 
-class IrrigationTimeEntity(TimeEntity, RestoreEntity):
+class IrrigationTimeEntity(TimeEntity):
     """Heure de déclenchement de l'arrosage automatique."""
 
     _attr_has_entity_name = True
@@ -42,29 +37,14 @@ class IrrigationTimeEntity(TimeEntity, RestoreEntity):
 
     def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        time_str: str = entry.options.get(CONF_IRRIGATION_TIME, DEFAULT_IRRIGATION_TIME)
-        self._time_value: dt_time = self._parse_time(time_str)
         self._attr_unique_id = f"{entry.entry_id}_irrigation_time"
         self._attr_device_info = _centrale_device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            parsed = self._parse_time(last.state)
-            if parsed is not None:
-                self._time_value = parsed
-        time_str = (
-            f"{self._time_value.hour:02d}:{self._time_value.minute:02d}:00"
-        )
-        self._coordinator.set_irrigation_time(time_str)
-
     @property
     def native_value(self) -> dt_time:
-        return self._time_value
+        return self._parse_time(self._coordinator.irrigation_time)
 
     async def async_set_value(self, value: dt_time) -> None:
-        self._time_value = value
         time_str = f"{value.hour:02d}:{value.minute:02d}:00"
         self._coordinator.set_irrigation_time(time_str)
         self.async_write_ha_state()

@@ -1,7 +1,9 @@
 """Plateforme select — My Garden Irrigation.
 
-Toutes les entités héritent de RestoreEntity pour persister leur valeur
-sans écrire dans ConfigEntry.options (Module 1 du CDC de refactoring).
+StageSelect hérite de RestoreEntity (valeur modifiable sans formulaire).
+WateringFrequencySelect et WateringModeSelect lisent depuis le coordinateur
+(initialisé depuis entry.options) — après un rechargement via le formulaire,
+c'est entry.options qui fait autorité, pas le dernier état HA.
 """
 from __future__ import annotations
 
@@ -20,8 +22,6 @@ from .const import (
     DOMAIN,
     STAGES,
     WATERING_FREQUENCIES,
-    WATERING_FREQUENCY_DAILY,
-    WATERING_MODE_CONTINUOUS,
     WATERING_MODES,
 )
 from .coordinator import IrrigationCoordinator
@@ -47,7 +47,7 @@ async def async_setup_entry(
 
 
 class StageSelect(SelectEntity, RestoreEntity):
-    """Contrôle le stade de croissance d'une culture."""
+    """Contrôle le stade de croissance d'une culture (RestoreEntity)."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "stage"
@@ -85,8 +85,8 @@ class StageSelect(SelectEntity, RestoreEntity):
         await self._coordinator.async_request_refresh()
 
 
-class WateringFrequencySelect(SelectEntity, RestoreEntity):
-    """Contrôle la fréquence d'arrosage du potager (centrale)."""
+class WateringFrequencySelect(SelectEntity):
+    """Contrôle la fréquence d'arrosage — lit depuis le coordinateur."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "watering_frequency"
@@ -95,29 +95,20 @@ class WateringFrequencySelect(SelectEntity, RestoreEntity):
 
     def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        self._current: str = entry.options.get(CONF_WATERING_FREQUENCY, WATERING_FREQUENCY_DAILY)
         self._attr_unique_id = f"{entry.entry_id}_watering_frequency"
         self._attr_device_info = _centrale_device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state in WATERING_FREQUENCIES:
-            self._current = last.state
-        self._coordinator.set_watering_frequency(self._current)
-
     @property
     def current_option(self) -> str:
-        return self._current
+        return self._coordinator.watering_frequency
 
     async def async_select_option(self, option: str) -> None:
-        self._current = option
         self._coordinator.set_watering_frequency(option)
         self.async_write_ha_state()
 
 
-class WateringModeSelect(SelectEntity, RestoreEntity):
-    """Contrôle le mode d'arrosage du potager (centrale) : continu ou fractionné."""
+class WateringModeSelect(SelectEntity):
+    """Contrôle le mode d'arrosage — lit depuis le coordinateur."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "watering_mode"
@@ -126,22 +117,13 @@ class WateringModeSelect(SelectEntity, RestoreEntity):
 
     def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        self._current: str = entry.options.get(CONF_WATERING_MODE, WATERING_MODE_CONTINUOUS)
         self._attr_unique_id = f"{entry.entry_id}_watering_mode"
         self._attr_device_info = _centrale_device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state in WATERING_MODES:
-            self._current = last.state
-        self._coordinator.set_watering_mode(self._current)
-
     @property
     def current_option(self) -> str:
-        return self._current
+        return self._coordinator.watering_mode
 
     async def async_select_option(self, option: str) -> None:
-        self._current = option
         self._coordinator.set_watering_mode(option)
         self.async_write_ha_state()

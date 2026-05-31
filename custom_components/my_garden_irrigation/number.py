@@ -1,7 +1,9 @@
 """Plateforme number — My Garden Irrigation.
 
-Toutes les entités héritent de RestoreEntity pour persister leur valeur
-sans écrire dans ConfigEntry.options (Module 1 du CDC de refactoring).
+Seules les entités pilotées UNIQUEMENT par l'utilisateur via l'interface
+(NbPlantsNumber, DensityNumber) héritent de RestoreEntity — conformément
+au CDC (Module 1). Les entités de configuration globale lisent leur valeur
+depuis le coordinateur, lui-même initialisé depuis entry.options au démarrage.
 """
 from __future__ import annotations
 
@@ -47,8 +49,13 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
+# ---------------------------------------------------------------------------
+# Entités par culture — RestoreEntity (valeurs modifiables sans passer par
+# le formulaire de config, donc non présentes dans entry.options)
+# ---------------------------------------------------------------------------
+
 class NbPlantsNumber(NumberEntity, RestoreEntity):
-    """Contrôle le nombre de plants d'une culture — valeur persistée via RestoreEntity."""
+    """Contrôle le nombre de plants d'une culture."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "nb_plants"
@@ -137,7 +144,13 @@ class DensityNumber(NumberEntity, RestoreEntity):
         await self._coordinator.async_request_refresh()
 
 
-class GlobalFlowRateNumber(NumberEntity, RestoreEntity):
+# ---------------------------------------------------------------------------
+# Entités de configuration globale — lisent depuis le coordinateur
+# (lui-même initialisé depuis entry.options). Pas de RestoreEntity :
+# après un rechargement via le formulaire, entry.options fait autorité.
+# ---------------------------------------------------------------------------
+
+class GlobalFlowRateNumber(NumberEntity):
     """Contrôle le débit total de l'installation d'arrosage (L/h) — centrale."""
 
     _attr_has_entity_name = True
@@ -151,32 +164,20 @@ class GlobalFlowRateNumber(NumberEntity, RestoreEntity):
 
     def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        self._value: float = float(entry.options.get(CONF_GLOBAL_FLOW_RATE, 0.0))
         self._attr_unique_id = f"{entry.entry_id}_global_flow_rate"
         self._attr_device_info = _centrale_device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            try:
-                self._value = float(last.state)
-            except ValueError:
-                pass
-        self._coordinator.set_flow_rate(self._value)
-
     @property
     def native_value(self) -> float:
-        return self._value
+        return self._coordinator.flow_rate
 
     async def async_set_native_value(self, value: float) -> None:
-        self._value = round(value, 1)
-        self._coordinator.set_flow_rate(self._value)
+        self._coordinator.set_flow_rate(round(value, 1))
         self.async_write_ha_state()
 
 
-class WateringIntervalDaysNumber(NumberEntity, RestoreEntity):
-    """Intervalle en jours entre deux arrosages (utilisé si fréquence = intervalle fixe)."""
+class WateringIntervalDaysNumber(NumberEntity):
+    """Intervalle en jours entre deux arrosages (fréquence = intervalle fixe)."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "watering_interval_days"
@@ -188,31 +189,19 @@ class WateringIntervalDaysNumber(NumberEntity, RestoreEntity):
 
     def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        self._value: float = float(entry.options.get(CONF_WATERING_INTERVAL_DAYS, 2))
         self._attr_unique_id = f"{entry.entry_id}_watering_interval_days"
         self._attr_device_info = _centrale_device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            try:
-                self._value = float(last.state)
-            except ValueError:
-                pass
-        self._coordinator.set_watering_interval_days(int(self._value))
-
     @property
     def native_value(self) -> float:
-        return self._value
+        return float(self._coordinator.watering_interval_days)
 
     async def async_set_native_value(self, value: float) -> None:
-        self._value = float(int(value))
         self._coordinator.set_watering_interval_days(int(value))
         self.async_write_ha_state()
 
 
-class CyclesCountNumber(NumberEntity, RestoreEntity):
+class CyclesCountNumber(NumberEntity):
     """Nombre de cycles pour le mode d'arrosage fractionné (Cycle & Soak)."""
 
     _attr_has_entity_name = True
@@ -225,33 +214,19 @@ class CyclesCountNumber(NumberEntity, RestoreEntity):
 
     def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        self._value: float = float(
-            entry.options.get(CONF_CYCLES_COUNT, DEFAULT_CYCLES_COUNT)
-        )
         self._attr_unique_id = f"{entry.entry_id}_cycles_count"
         self._attr_device_info = _centrale_device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            try:
-                self._value = float(last.state)
-            except ValueError:
-                pass
-        self._coordinator.set_cycles_count(int(self._value))
-
     @property
     def native_value(self) -> float:
-        return self._value
+        return float(self._coordinator.cycles_count)
 
     async def async_set_native_value(self, value: float) -> None:
-        self._value = float(int(value))
         self._coordinator.set_cycles_count(int(value))
         self.async_write_ha_state()
 
 
-class SoakDurationNumber(NumberEntity, RestoreEntity):
+class SoakDurationNumber(NumberEntity):
     """Durée de repos (minutes) entre chaque cycle du mode fractionné."""
 
     _attr_has_entity_name = True
@@ -265,27 +240,13 @@ class SoakDurationNumber(NumberEntity, RestoreEntity):
 
     def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        self._value: float = float(
-            entry.options.get(CONF_SOAK_DURATION, DEFAULT_SOAK_DURATION_MINUTES)
-        )
         self._attr_unique_id = f"{entry.entry_id}_soak_duration"
         self._attr_device_info = _centrale_device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            try:
-                self._value = float(last.state)
-            except ValueError:
-                pass
-        self._coordinator.set_soak_duration_minutes(int(self._value))
-
     @property
     def native_value(self) -> float:
-        return self._value
+        return float(self._coordinator.soak_duration_minutes)
 
     async def async_set_native_value(self, value: float) -> None:
-        self._value = float(int(value))
         self._coordinator.set_soak_duration_minutes(int(value))
         self.async_write_ha_state()
