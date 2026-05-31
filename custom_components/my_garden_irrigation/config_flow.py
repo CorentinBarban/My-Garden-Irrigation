@@ -160,7 +160,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
                         CONF_DENSITY: float(user_input[CONF_DENSITY]),
                     }
                 )
-                return self._save()
+                return await self._save()
 
         return self.async_show_form(
             step_id="add_crop",
@@ -214,7 +214,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
             self._crops = [
                 c for c in self._crops if c[CONF_CROP_ID] != crop_id_to_remove
             ]
-            return self._save()
+            return await self._save()
 
         # Module 4 : label = crop_name uniquement (pas de f-string composite).
         # Le placeholder {crops_count} est déclaré dans strings.json.
@@ -247,7 +247,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
         if user_input is not None:
             self._valve_entity_id = user_input.get(CONF_GLOBAL_VALVE_ENTITY_ID) or None
             self._flow_rate = float(user_input.get(CONF_GLOBAL_FLOW_RATE) or 0.0)
-            return self._save()
+            return await self._save()
 
         suggested: dict[str, Any] = {}
         if self._valve_entity_id:
@@ -295,7 +295,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
                 if soak is not None:
                     self._soak_duration = int(soak)
 
-            return self._save()
+            return await self._save()
 
         suggested: dict[str, Any] = {
             CONF_WATERING_FREQUENCY: self._watering_frequency,
@@ -350,7 +350,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
     ) -> ConfigFlowResult:
         if user_input is not None:
             self._irrigation_time = user_input.get(CONF_IRRIGATION_TIME, DEFAULT_IRRIGATION_TIME)
-            return self._save()
+            return await self._save()
 
         suggested: dict[str, Any] = {CONF_IRRIGATION_TIME: self._irrigation_time}
         schema = vol.Schema(
@@ -367,7 +367,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
     # Persistance
     # ------------------------------------------------------------------
 
-    def _save(self) -> ConfigFlowResult:
+    async def _save(self) -> ConfigFlowResult:
         """Enregistre toutes les options — OptionsFlowWithReload déclenche le rechargement."""
         data: dict[str, Any] = {CONF_CROPS: self._crops}
         if self._valve_entity_id:
@@ -383,4 +383,4 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
         data[CONF_IRRIGATION_TIME] = self._irrigation_time
         data[CONF_CYCLES_COUNT] = self._cycles_count
         data[CONF_SOAK_DURATION] = self._soak_duration
-        return self.async_create_entry(data=data)
+        return await self.async_create_entry(data=data)
