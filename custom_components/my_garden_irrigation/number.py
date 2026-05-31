@@ -169,7 +169,7 @@ class GlobalFlowRateNumber(NumberEntity):
 
     @property
     def native_value(self) -> float:
-        return self._coordinator.flow_rate
+        return self._coordinator.config.flow_rate
 
     async def async_set_native_value(self, value: float) -> None:
         self._coordinator.set_flow_rate(round(value, 1))
@@ -194,7 +194,7 @@ class WateringIntervalDaysNumber(NumberEntity):
 
     @property
     def native_value(self) -> float:
-        return float(self._coordinator.watering_interval_days)
+        return float(self._coordinator.config.watering_interval_days)
 
     async def async_set_native_value(self, value: float) -> None:
         self._coordinator.set_watering_interval_days(int(value))
@@ -219,7 +219,7 @@ class CyclesCountNumber(NumberEntity):
 
     @property
     def native_value(self) -> float:
-        return float(self._coordinator.cycles_count)
+        return float(self._coordinator.config.cycles_count)
 
     async def async_set_native_value(self, value: float) -> None:
         self._coordinator.set_cycles_count(int(value))
@@ -245,7 +245,7 @@ class SoakDurationNumber(NumberEntity):
 
     @property
     def native_value(self) -> float:
-        return float(self._coordinator.soak_duration_minutes)
+        return float(self._coordinator.config.soak_duration_minutes)
 
     async def async_set_native_value(self, value: float) -> None:
         self._coordinator.set_soak_duration_minutes(int(value))

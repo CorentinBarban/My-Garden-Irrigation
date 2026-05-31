@@ -42,7 +42,7 @@ class IrrigationTimeEntity(TimeEntity):
 
     @property
     def native_value(self) -> dt_time:
-        return self._parse_time(self._coordinator.irrigation_time)
+        return self._parse_time(self._coordinator.config.irrigation_time)
 
     async def async_set_value(self, value: dt_time) -> None:
         time_str = f"{value.hour:02d}:{value.minute:02d}:00"

@@ -4,33 +4,43 @@ Gère :
 - L'accumulation à minuit (ADR-008) via async_track_point_in_time.
 - Le déclenchement quotidien de l'arrosage automatique.
 
-Au lieu de piloter directement la vanne, émet un événement HA
-que le blueprint d'automatisation écoute (Module 6).
+Ne connaît pas IrrigationCoordinator — reçoit RuntimeConfigState (état pur)
+et deux callbacks async pour déléguer les effets de bord au coordinator.
 """
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING, Callable
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.util import dt as dt_util
 
+from .config_state import RuntimeConfigState
 from .const import WATERING_FREQUENCY_INTERVAL
-
-if TYPE_CHECKING:
-    from .coordinator import IrrigationCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class IrrigationScheduler:
-    """Planifie l'accumulation à minuit et l'arrosage automatique."""
+    """Planifie l'accumulation à minuit et l'arrosage automatique.
 
-    def __init__(self, hass: HomeAssistant, coordinator: IrrigationCoordinator) -> None:
+    on_midnight()              — appelé chaque nuit à 00:00:05 par le scheduler.
+    on_trigger(date_iso: str)  — appelé quand les conditions d'arrosage sont remplies.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: RuntimeConfigState,
+        on_midnight: Callable[[], Awaitable[None]],
+        on_trigger: Callable[[str], Awaitable[None]],
+    ) -> None:
         self._hass = hass
-        self._coordinator = coordinator
+        self._config = config
+        self._on_midnight = on_midnight
+        self._on_trigger = on_trigger
         self._midnight_unsub: Callable | None = None
         self._auto_unsub: Callable | None = None
 
@@ -54,10 +64,10 @@ class IrrigationScheduler:
             self._auto_unsub()
             self._auto_unsub = None
 
-        if not self._coordinator.auto_irrigation_enabled:
+        if not self._config.auto_irrigation_enabled:
             return
 
-        time_str = self._coordinator.irrigation_time
+        time_str = self._config.irrigation_time
         try:
             parts = time_str.split(":")
             hour, minute = int(parts[0]), int(parts[1])
@@ -80,16 +90,15 @@ class IrrigationScheduler:
 
     async def _handle_midnight(self, _now: datetime) -> None:
         """Transfère le besoin journalier résiduel au bilan cumulé."""
-        await self._coordinator.handle_midnight_transfer()
+        await self._on_midnight()
         self._schedule_midnight()
 
     async def _handle_auto_irrigation(self, _now: datetime) -> None:
-        """Vérifie les conditions de fréquence puis émet l'événement d'arrosage."""
-        frequency = self._coordinator.watering_frequency
-        if frequency == WATERING_FREQUENCY_INTERVAL:
-            interval_days = self._coordinator.watering_interval_days
+        """Vérifie les conditions de fréquence puis déclenche l'arrosage."""
+        if self._config.watering_frequency == WATERING_FREQUENCY_INTERVAL:
+            interval_days = self._config.watering_interval_days
             today = dt_util.now().date()
-            last_date_str = self._coordinator.last_auto_watering_date
+            last_date_str = self._config.last_auto_watering_date
             if last_date_str:
                 days_since = (today - date.fromisoformat(last_date_str)).days
                 if days_since < interval_days:
@@ -101,8 +110,7 @@ class IrrigationScheduler:
                     self.reschedule_auto_irrigation()
                     return
 
-        self._coordinator.fire_irrigation_event()
-        await self._coordinator.update_last_watering_date(dt_util.now().date().isoformat())
+        await self._on_trigger(dt_util.now().date().isoformat())
         self.reschedule_auto_irrigation()
 
     # ------------------------------------------------------------------

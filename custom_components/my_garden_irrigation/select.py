@@ -100,7 +100,7 @@ class WateringFrequencySelect(SelectEntity):
 
     @property
     def current_option(self) -> str:
-        return self._coordinator.watering_frequency
+        return self._coordinator.config.watering_frequency
 
     async def async_select_option(self, option: str) -> None:
         self._coordinator.set_watering_frequency(option)
@@ -122,7 +122,7 @@ class WateringModeSelect(SelectEntity):
 
     @property
     def current_option(self) -> str:
-        return self._coordinator.watering_mode
+        return self._coordinator.config.watering_mode
 
     async def async_select_option(self, option: str) -> None:
         self._coordinator.set_watering_mode(option)

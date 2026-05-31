@@ -309,24 +309,24 @@ class TotalCumulativeNeedSensor(CoordinatorEntity[IrrigationCoordinator], Sensor
         if data is None:
             return {}
         total_cumulative = sum(data.cumulative_need.values())
-        flow_rate = self.coordinator.flow_rate
+        flow_rate = self.coordinator.config.flow_rate
         if flow_rate <= 0 or total_cumulative <= 0:
             return {
                 ATTR_RECOMMENDED_DURATION_MINUTES: 0,
-                ATTR_IS_FRACTIONED: self.coordinator.watering_mode == WATERING_MODE_FRACTIONED,
-                ATTR_CYCLES_COUNT: self.coordinator.cycles_count,
+                ATTR_IS_FRACTIONED: self.coordinator.config.watering_mode == WATERING_MODE_FRACTIONED,
+                ATTR_CYCLES_COUNT: self.coordinator.config.cycles_count,
                 ATTR_DURATION_PER_CYCLE_MINUTES: 0,
-                ATTR_SOAK_DURATION_MINUTES: self.coordinator.soak_duration_minutes,
+                ATTR_SOAK_DURATION_MINUTES: self.coordinator.config.soak_duration_minutes,
             }
         duration_minutes = round((total_cumulative / flow_rate) * 60, 1)
-        is_fractioned = self.coordinator.watering_mode == WATERING_MODE_FRACTIONED
-        cycles = self.coordinator.cycles_count
+        is_fractioned = self.coordinator.config.watering_mode == WATERING_MODE_FRACTIONED
+        cycles = self.coordinator.config.cycles_count
         return {
             ATTR_RECOMMENDED_DURATION_MINUTES: duration_minutes,
             ATTR_IS_FRACTIONED: is_fractioned,
             ATTR_CYCLES_COUNT: cycles,
             ATTR_DURATION_PER_CYCLE_MINUTES: round(duration_minutes / cycles, 1) if cycles else 0,
-            ATTR_SOAK_DURATION_MINUTES: self.coordinator.soak_duration_minutes,
+            ATTR_SOAK_DURATION_MINUTES: self.coordinator.config.soak_duration_minutes,
         }
 
 
@@ -387,19 +387,19 @@ class NextWateringSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity)
 
     @property
     def native_value(self) -> datetime | None:
-        time_str = self.coordinator.irrigation_time
+        time_str = self.coordinator.config.irrigation_time
         try:
             parts = time_str.split(":")
             hour, minute = int(parts[0]), int(parts[1])
         except (ValueError, AttributeError, IndexError):
             return None
 
-        frequency = self.coordinator.watering_frequency
+        frequency = self.coordinator.config.watering_frequency
         now = dt_util.now()
 
         if frequency == WATERING_FREQUENCY_INTERVAL:
-            interval_days = self.coordinator.watering_interval_days
-            last_date_str = self.coordinator.last_auto_watering_date
+            interval_days = self.coordinator.config.watering_interval_days
+            last_date_str = self.coordinator.config.last_auto_watering_date
             if last_date_str:
                 from datetime import date as _date
                 last = _date.fromisoformat(last_date_str)

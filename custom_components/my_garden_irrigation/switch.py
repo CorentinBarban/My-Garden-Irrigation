@@ -37,7 +37,7 @@ class AutoIrrigationSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        return self._coordinator.auto_irrigation_enabled
+        return self._coordinator.config.auto_irrigation_enabled
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._coordinator.async_set_auto_irrigation(True)
