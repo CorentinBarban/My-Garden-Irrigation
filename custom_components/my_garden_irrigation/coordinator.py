@@ -113,7 +113,14 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
                 self._watering_applied_today = stored.get("watering_applied_today", {})
             self._auto_enabled = stored.get("auto_irrigation_enabled", False)
             self._last_auto_watering_date = stored.get("last_auto_watering_date")
+            valve_open_time_str: str | None = stored.get("valve_open_time")
+            if valve_open_time_str:
+                self._valve_open_time = datetime.fromisoformat(valve_open_time_str)
 
+        if self._auto_enabled and self._last_auto_watering_date is None:
+            self._last_auto_watering_date = dt_util.now().date().isoformat()
+
+        await self._restore_valve_state()
         self._setup_valve_listener()
         self._schedule_midnight_update()
         self._setup_auto_irrigation()
@@ -145,6 +152,30 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     # ------------------------------------------------------------------
     # Vanne globale (ADR-009)
     # ------------------------------------------------------------------
+
+    async def _restore_valve_state(self) -> None:
+        """Réconcilie _valve_open_time avec l'état réel de la vanne après redémarrage."""
+        valve_id: str | None = self._entry.options.get(CONF_GLOBAL_VALVE_ENTITY_ID)
+        if not valve_id:
+            return
+        state = self.hass.states.get(valve_id)
+        if state is None:
+            return
+        current = state.state
+        if current in _OPEN_STATES:
+            if self._valve_open_time is None:
+                self._valve_open_time = dt_util.utcnow()
+                _LOGGER.warning(
+                    "Vanne %s ouverte au démarrage sans heure d'ouverture connue — "
+                    "décompte du volume depuis maintenant.",
+                    valve_id,
+                )
+        elif current in _CLOSED_STATES and self._valve_open_time is not None:
+            _LOGGER.info(
+                "Vanne %s fermée pendant le redémarrage — comptabilisation du volume.",
+                valve_id,
+            )
+            await self._handle_valve_close()
 
     def _setup_valve_listener(self) -> None:
         valve_entity_id = self._entry.options.get(CONF_GLOBAL_VALVE_ENTITY_ID)
@@ -297,6 +328,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     async def async_set_auto_irrigation(self, enabled: bool) -> None:
         """Active ou désactive l'arrosage automatique depuis le switch HA."""
         self._auto_enabled = enabled
+        if enabled and self._last_auto_watering_date is None:
+            self._last_auto_watering_date = dt_util.now().date().isoformat()
         await self._save_state()
         self._setup_auto_irrigation()
         await self.async_refresh()
@@ -329,6 +362,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         total_cumulative = sum(data.cumulative_need.values())
         if total_cumulative <= 0:
             _LOGGER.debug("Arrosage auto : besoin cumulé = 0 L — ignoré.")
+            self._last_auto_watering_date = dt_util.now().date().isoformat()
+            await self._save_state()
             return
 
         flow_rate: float = self._entry.options.get(CONF_GLOBAL_FLOW_RATE, 0.0)
@@ -406,6 +441,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
                 "watering_date": dt_util.now().date().isoformat(),
                 "auto_irrigation_enabled": self._auto_enabled,
                 "last_auto_watering_date": self._last_auto_watering_date,
+                "valve_open_time": self._valve_open_time.isoformat() if self._valve_open_time else None,
             }
         )
 
