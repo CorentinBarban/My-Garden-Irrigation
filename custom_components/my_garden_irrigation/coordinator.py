@@ -9,6 +9,8 @@ ADR-009 : vanne globale — géré par ValveTracker.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -52,6 +54,31 @@ from .kc_loader import async_load_kc_data
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(hours=1)
+
+# Clés de config globale persistées hors entry.options (runtime overrides)
+_RUNTIME_CONFIG_KEYS = (
+    CONF_GLOBAL_FLOW_RATE,
+    CONF_WATERING_INTERVAL_DAYS,
+    CONF_WATERING_FREQUENCY,
+    CONF_WATERING_MODE,
+    CONF_IRRIGATION_TIME,
+    CONF_CYCLES_COUNT,
+    CONF_SOAK_DURATION,
+)
+
+
+def _options_hash(options: dict) -> str:
+    """Hash stable des clés de config globale dans entry.options.
+
+    Permet de détecter si entry.options a changé depuis le dernier save
+    runtime (i.e. l'utilisateur a soumis le formulaire entre-temps).
+    Si le hash diffère, les overrides entity sont ignorés : le formulaire
+    fait autorité.
+    """
+    relevant = {k: options.get(k) for k in _RUNTIME_CONFIG_KEYS}
+    return hashlib.md5(
+        json.dumps(relevant, sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
@@ -156,26 +183,38 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
     def set_flow_rate(self, value: float) -> None:
         self._flow_rate = value
+        self._schedule_config_save()
 
     def set_watering_interval_days(self, value: int) -> None:
         self._watering_interval_days = value
+        self._schedule_config_save()
 
     def set_watering_frequency(self, value: str) -> None:
         self._watering_frequency = value
+        self._schedule_config_save()
 
     def set_watering_mode(self, value: str) -> None:
         self._watering_mode = value
+        self._schedule_config_save()
 
     def set_irrigation_time(self, value: str) -> None:
         self._irrigation_time = value
         if self._scheduler is not None:
             self._scheduler.reschedule_auto_irrigation()
+        self._schedule_config_save()
 
     def set_cycles_count(self, value: int) -> None:
         self._cycles_count = value
+        self._schedule_config_save()
 
     def set_soak_duration_minutes(self, value: int) -> None:
         self._soak_duration_minutes = value
+        self._schedule_config_save()
+
+    def _schedule_config_save(self) -> None:
+        """Planifie une sauvegarde du runtime config sans bloquer le thread."""
+        if self._store is not None:
+            self.hass.async_create_task(self._save_state())
 
     # ------------------------------------------------------------------
     # API pour ValveTracker
@@ -329,6 +368,28 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             if valve_open_time_str:
                 self._valve_open_time = datetime.fromisoformat(valve_open_time_str)
 
+            # Restaure les overrides de config globale faits via les entités HA.
+            # Le hash garantit que si l'utilisateur a soumis le formulaire entre-temps
+            # (entry.options a changé), les anciennes valeurs runtime sont ignorées
+            # et les nouvelles valeurs du formulaire restent autoritaires.
+            runtime = stored.get("runtime_config", {})
+            if runtime and runtime.get("options_hash") == _options_hash(self._entry.options):
+                if CONF_GLOBAL_FLOW_RATE in runtime:
+                    self._flow_rate = float(runtime[CONF_GLOBAL_FLOW_RATE])
+                if CONF_WATERING_INTERVAL_DAYS in runtime:
+                    self._watering_interval_days = int(runtime[CONF_WATERING_INTERVAL_DAYS])
+                if CONF_WATERING_FREQUENCY in runtime:
+                    self._watering_frequency = str(runtime[CONF_WATERING_FREQUENCY])
+                if CONF_WATERING_MODE in runtime:
+                    self._watering_mode = str(runtime[CONF_WATERING_MODE])
+                if CONF_IRRIGATION_TIME in runtime:
+                    self._irrigation_time = str(runtime[CONF_IRRIGATION_TIME])
+                if CONF_CYCLES_COUNT in runtime:
+                    self._cycles_count = int(runtime[CONF_CYCLES_COUNT])
+                if CONF_SOAK_DURATION in runtime:
+                    self._soak_duration_minutes = int(runtime[CONF_SOAK_DURATION])
+                _LOGGER.debug("Runtime config restauré depuis le Store.")
+
         if self._auto_enabled and self._last_auto_watering_date is None:
             self._last_auto_watering_date = dt_util.now().date().isoformat()
 
@@ -364,6 +425,18 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
                 "valve_open_time": (
                     self._valve_open_time.isoformat() if self._valve_open_time else None
                 ),
+                # Overrides de config globale faits via les entités HA (sans formulaire).
+                # Le hash permet de détecter si entry.options a changé depuis ce save.
+                "runtime_config": {
+                    "options_hash": _options_hash(self._entry.options),
+                    CONF_GLOBAL_FLOW_RATE: self._flow_rate,
+                    CONF_WATERING_INTERVAL_DAYS: self._watering_interval_days,
+                    CONF_WATERING_FREQUENCY: self._watering_frequency,
+                    CONF_WATERING_MODE: self._watering_mode,
+                    CONF_IRRIGATION_TIME: self._irrigation_time,
+                    CONF_CYCLES_COUNT: self._cycles_count,
+                    CONF_SOAK_DURATION: self._soak_duration_minutes,
+                },
             }
         )
 
