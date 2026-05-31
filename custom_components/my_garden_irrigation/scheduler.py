@@ -90,8 +90,12 @@ class IrrigationScheduler:
 
     async def _handle_midnight(self, _now: datetime) -> None:
         """Transfère le besoin journalier résiduel au bilan cumulé."""
-        await self._on_midnight()
-        self._schedule_midnight()
+        try:
+            await self._on_midnight()
+        except Exception as exc:
+            _LOGGER.error("Erreur lors du transfert de minuit : %s", exc)
+        finally:
+            self._schedule_midnight()
 
     async def _handle_auto_irrigation(self, _now: datetime) -> None:
         """Vérifie les conditions de fréquence puis déclenche l'arrosage."""

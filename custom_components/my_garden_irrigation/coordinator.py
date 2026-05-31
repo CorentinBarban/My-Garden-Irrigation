@@ -16,8 +16,9 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -54,6 +55,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self._persistence = PersistenceManager(hass, entry.entry_id)
         self._kc_data: dict = {}
         self._scheduler: Any = None
+        self._last_daily_needs: dict[str, float] = {}
+        self._save_unsub: Any = None
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -80,6 +83,14 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
         self._entry.async_on_unload(tracker.setup())
         self._entry.async_on_unload(scheduler.setup())
+
+        @callback
+        def _cancel_pending_save() -> None:
+            if self._save_unsub is not None:
+                self._save_unsub()
+                self._save_unsub = None
+
+        self._entry.async_on_unload(_cancel_pending_save)
 
         await self.async_config_entry_first_refresh()
 
@@ -108,9 +119,16 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             daily_needs = {
                 cid: r.daily_need_liters for cid, r in self.data.crops.items()
             }
-            self.config.apply_midnight_transfer(daily_needs)
+        elif self._last_daily_needs:
+            _LOGGER.warning(
+                "Données météo indisponibles au transfert de minuit — "
+                "utilisation du dernier besoin journalier connu."
+            )
+            daily_needs = self._last_daily_needs
         else:
-            self.config.apply_midnight_transfer({})
+            _LOGGER.warning("Aucune donnée météo disponible pour le transfert de minuit.")
+            daily_needs = {}
+        self.config.apply_midnight_transfer(daily_needs)
         await self._persistence.async_save(
             self.config.to_storage(dt_util.now().date().isoformat())
         )
@@ -127,6 +145,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
     def update_crop_field(self, crop_id: str, field: str, value: object) -> None:
         self.config.update_crop_field(crop_id, field, value)
+        self._schedule_config_save()
 
     def set_flow_rate(self, value: float) -> None:
         self.config.set_flow_rate(value)
@@ -214,10 +233,9 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             "is_fractioned": is_fractioned,
         }
         if is_fractioned:
-            payload["cycles_count"] = self.config.cycles_count
-            payload["duration_per_cycle_minutes"] = round(
-                duration_minutes / self.config.cycles_count, 1
-            )
+            cycles = max(1, self.config.cycles_count)
+            payload["cycles_count"] = cycles
+            payload["duration_per_cycle_minutes"] = round(duration_minutes / cycles, 1)
             payload["soak_duration_minutes"] = self.config.soak_duration_minutes
 
         self.hass.bus.async_fire(f"{DOMAIN}_irrigation_requested", payload)
@@ -236,7 +254,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         """Récupère ETo et précipitations puis calcule les besoins nets."""
         eto_mm, precipitation_mm = await self._fetch_weather()
         self.config.warn_unreasonable_surfaces()
-        return compute_irrigation_data(
+        data = compute_irrigation_data(
             crops=self.config.crops,
             kc_data=self._kc_data,
             eto_mm=eto_mm,
@@ -245,6 +263,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             watering_applied_today=self.config.watering_applied_today,
             cumulative_need=self.config.cumulative_need,
         )
+        self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
+        return data
 
     async def _fetch_weather(self) -> tuple[float, float]:
         """Appelle Open-Meteo pour obtenir l'ETo et les précipitations du jour."""
@@ -295,10 +315,24 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     # ------------------------------------------------------------------
 
     def _schedule_config_save(self) -> None:
-        """Planifie une sauvegarde asynchrone sans bloquer l'appelant."""
-        self.hass.async_create_task(
-            self._persistence.async_save(
+        """Planifie une sauvegarde avec debounce 0.5 s et gestion d'erreur."""
+        if self._save_unsub is not None:
+            self._save_unsub()
+
+        @callback
+        def _trigger(_now=None) -> None:
+            self._save_unsub = None
+            self.hass.async_create_task(
+                self._persist_config(), name=f"{DOMAIN}_config_save"
+            )
+
+        self._save_unsub = async_call_later(self.hass, 0.5, _trigger)
+
+    async def _persist_config(self) -> None:
+        try:
+            await self._persistence.async_save(
                 self.config.to_storage(dt_util.now().date().isoformat())
             )
-        )
+        except Exception as exc:
+            _LOGGER.warning("Échec de la sauvegarde de la configuration : %s", exc)
 

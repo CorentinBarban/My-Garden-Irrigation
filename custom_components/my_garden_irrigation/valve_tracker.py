@@ -47,6 +47,10 @@ class ValveTracker:
 
         valve_id: str | None = self._config.valve_entity_id
         if not valve_id:
+            _LOGGER.warning(
+                "Aucune vanne globale configurée — "
+                "le suivi du volume distribué est désactivé."
+            )
             return lambda: None
 
         unsub = async_track_state_change_event(
@@ -62,28 +66,33 @@ class ValveTracker:
 
     async def _restore_valve_state(self) -> None:
         """Réconcilie valve_open_time avec l'état réel de la vanne après redémarrage."""
-        valve_id: str | None = self._config.valve_entity_id
-        if not valve_id:
-            return
-        state = self._hass.states.get(valve_id)
-        if state is None:
-            return
+        try:
+            valve_id: str | None = self._config.valve_entity_id
+            if not valve_id:
+                return
+            state = self._hass.states.get(valve_id)
+            if state is None:
+                return
 
-        current = state.state
-        if current in _OPEN_STATES:
-            if self._config.get_valve_open_time() is None:
-                self._config.set_valve_open_time(dt_util.utcnow())
-                _LOGGER.warning(
-                    "Vanne %s ouverte au démarrage sans heure d'ouverture connue — "
-                    "décompte du volume depuis maintenant.",
+            current = state.state
+            if current in _OPEN_STATES:
+                if self._config.get_valve_open_time() is None:
+                    self._config.set_valve_open_time(dt_util.utcnow())
+                    _LOGGER.warning(
+                        "Vanne %s ouverte au démarrage sans heure d'ouverture connue — "
+                        "décompte du volume depuis maintenant.",
+                        valve_id,
+                    )
+            elif current in _CLOSED_STATES and self._config.get_valve_open_time() is not None:
+                _LOGGER.info(
+                    "Vanne %s fermée pendant le redémarrage — comptabilisation du volume.",
                     valve_id,
                 )
-        elif current in _CLOSED_STATES and self._config.get_valve_open_time() is not None:
-            _LOGGER.info(
-                "Vanne %s fermée pendant le redémarrage — comptabilisation du volume.",
-                valve_id,
+                await self._handle_valve_close()
+        except Exception as exc:
+            _LOGGER.warning(
+                "Erreur lors de la restauration de l'état de la vanne : %s", exc
             )
-            await self._handle_valve_close()
 
     @callback
     def _handle_valve_state_change(self, event: Event) -> None:
