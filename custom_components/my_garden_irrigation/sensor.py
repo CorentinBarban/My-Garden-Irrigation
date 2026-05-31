@@ -39,11 +39,7 @@ from .const import (
     CONF_CROP_NAME,
     CONF_CROP_TYPE,
     CONF_CROPS,
-    CONF_IRRIGATION_TIME,
     CONF_NAME,
-    CONF_WATERING_FREQUENCY,
-    CONF_WATERING_INTERVAL_DAYS,
-    DEFAULT_IRRIGATION_TIME,
     DOMAIN,
     WATERING_FREQUENCY_INTERVAL,
     WATERING_MODE_FRACTIONED,
@@ -370,7 +366,11 @@ class PrecipitationSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity
 
 
 class NextWateringSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity):
-    """Date et heure du prochain arrosage automatique planifié."""
+    """Date et heure du prochain arrosage automatique planifié.
+
+    Lit les paramètres de planification depuis le coordinateur (runtime config)
+    et non depuis entry.options — compatible avec OptionsFlowWithReload.
+    """
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_has_entity_name = True
@@ -381,42 +381,30 @@ class NextWateringSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity)
         self, coordinator: IrrigationCoordinator, entry: ConfigEntry
     ) -> None:
         super().__init__(coordinator)
-        self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_next_watering"
         self._attr_translation_key = "next_watering"
         self._attr_device_info = _centrale_device_info(entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self.async_on_remove(
-            self._entry.add_update_listener(self._handle_options_update)
-        )
-
-    async def _handle_options_update(
-        self, hass: HomeAssistant, entry: ConfigEntry
-    ) -> None:
-        self.async_write_ha_state()
-
     @property
     def native_value(self) -> datetime | None:
-        time_str: str = self._entry.options.get(CONF_IRRIGATION_TIME, DEFAULT_IRRIGATION_TIME)
+        time_str = self.coordinator.irrigation_time
         try:
             parts = time_str.split(":")
             hour, minute = int(parts[0]), int(parts[1])
         except (ValueError, AttributeError, IndexError):
             return None
 
-        frequency: str = self._entry.options.get(CONF_WATERING_FREQUENCY, "daily")
+        frequency = self.coordinator.watering_frequency
         now = dt_util.now()
 
         if frequency == WATERING_FREQUENCY_INTERVAL:
-            interval_days: int = self._entry.options.get(CONF_WATERING_INTERVAL_DAYS, 2)
-            last_date_str: str | None = self.coordinator.last_auto_watering_date
+            interval_days = self.coordinator.watering_interval_days
+            last_date_str = self.coordinator.last_auto_watering_date
             if last_date_str:
                 from datetime import date as _date
                 last = _date.fromisoformat(last_date_str)
                 next_date = last + timedelta(days=interval_days)
-                next_dt = now.replace(
+                return now.replace(
                     year=next_date.year,
                     month=next_date.month,
                     day=next_date.day,
@@ -425,8 +413,6 @@ class NextWateringSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity)
                     second=0,
                     microsecond=0,
                 )
-                return next_dt
-            # Pas encore arrosé : aujourd'hui si l'heure n'est pas passée, sinon dans interval_days jours
             base = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if base > now:
                 return base
