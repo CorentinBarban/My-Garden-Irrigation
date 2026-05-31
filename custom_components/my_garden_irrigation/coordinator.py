@@ -75,6 +75,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
         stored = await self._persistence.async_load()
         self.config.restore_from_storage(stored, dt_util.now().date().isoformat())
+        self.config.cleanup_stale_crops()
 
         if self.config.auto_irrigation_enabled and self.config.last_auto_watering_date is None:
             self.config.set_auto_irrigation(True, dt_util.now().date().isoformat())

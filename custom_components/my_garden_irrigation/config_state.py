@@ -337,5 +337,17 @@ class RuntimeConfigState:
                     density,
                 )
 
+    def cleanup_stale_crops(self) -> None:
+        """Retire du bilan hydrique les cultures absentes des options actuelles.
+
+        Appelé après restore_from_storage() quand une culture a été supprimée
+        via le formulaire. Évite que des crop_ids fantômes persistent dans le Store.
+        """
+        current_ids = {crop[CONF_CROP_ID] for crop in self._crop_data}
+        for stale_id in set(self._cumulative_need) - current_ids:
+            del self._cumulative_need[stale_id]
+        for stale_id in set(self._watering_applied_today) - current_ids:
+            del self._watering_applied_today[stale_id]
+
     def _get_crop_ids(self) -> list[str]:
         return [crop[CONF_CROP_ID] for crop in self._crop_data]

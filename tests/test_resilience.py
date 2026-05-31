@@ -1,17 +1,21 @@
-"""Tests de résilience — bugs critiques #1–#8.
+"""Tests de résilience et cohérence — bugs critiques.
 
 Approche : duck-typing sur les méthodes non-bornées pour éviter d'instancier
 HomeAssistant. Chaque test cible un bug précis identifié lors de l'analyse.
 
 Bugs couverts :
-    #1  scheduler  : _handle_midnight reschedule même si _on_midnight() lève
-    #2  coordinator: update_crop_field déclenche _schedule_config_save()
-    #3  coordinator: fire_irrigation_event ne lève pas ZeroDivisionError si cycles_count=0
-    #4  coordinator: _on_midnight utilise _last_daily_needs quand self.data is None
-    #5  coordinator: _persist_config log WARNING si la sauvegarde échoue (pas silence)
-    #6  coordinator: _async_update_data met à jour _last_daily_needs après chaque succès
-    #7  valve_tracker: _restore_valve_state absorbe les exceptions (try/except)
-    #8  valve_tracker: warning loggué si valve_entity_id est absent
+    #1  scheduler     : _handle_midnight reschedule même si _on_midnight() lève
+    #2  coordinator   : update_crop_field déclenche _schedule_config_save()
+    #3  coordinator   : fire_irrigation_event — pas de ZeroDivisionError si cycles_count=0
+    #4  coordinator   : _on_midnight utilise _last_daily_needs quand self.data is None
+    #5  coordinator   : _persist_config log WARNING si la sauvegarde échoue (pas silence)
+    #6  coordinator   : _async_update_data met à jour _last_daily_needs après chaque succès
+    #7  valve_tracker : _restore_valve_state absorbe les exceptions (try/except)
+    #8  valve_tracker : warning loggué si valve_entity_id est absent
+    #A  coordinator   : async_update_crop_field rescale le cumulatif proportionnellement
+    #B  config_flow   : async_step_init synchro depuis coordinator.config
+    #C  config_state  : cleanup_stale_crops() retire les entrées cumulées orphelines
+    #D  init          : _cleanup_removed_crop_entities supprime les entités HA orphelines
 """
 import asyncio
 import logging
@@ -550,3 +554,134 @@ def test_options_flow_init_graceful_when_no_coordinator():
 
     # Sans coordinator, la valeur entry.options est conservée
     assert handler._flow_rate == pytest.approx(200.0)
+
+
+# ---------------------------------------------------------------------------
+# Fix #C — config_state : cleanup_stale_crops retire les entrées orphelines
+# ---------------------------------------------------------------------------
+
+def test_cleanup_stale_crops_removes_from_cumulative():
+    """Les crop_ids absents des options sont retirés du cumulatif et daily."""
+    crop = {
+        CONF_CROP_ID: "c1",
+        CONF_CROP_TYPE: "tomate",
+        CONF_STAGE: "mid",
+        CONF_NB_PLANTS: 10,
+        CONF_DENSITY: 2.0,
+    }
+    state = RuntimeConfigState(_options(**{CONF_CROPS: [crop]}))
+    state._cumulative_need = {"c1": 10.0, "c_old": 25.0}
+    state._watering_applied_today = {"c1": 2.0, "c_old": 8.0}
+
+    state.cleanup_stale_crops()
+
+    assert "c_old" not in state.cumulative_need
+    assert "c_old" not in state.watering_applied_today
+    assert state.cumulative_need["c1"] == pytest.approx(10.0)
+    assert state.watering_applied_today["c1"] == pytest.approx(2.0)
+
+
+def test_cleanup_stale_crops_empty_noop():
+    """Sans données, cleanup_stale_crops ne lève pas."""
+    state = _make_state()
+    state.cleanup_stale_crops()
+    assert state.cumulative_need == {}
+
+
+def test_cleanup_stale_crops_current_preserved():
+    """Les cultures actuelles ne sont pas touchées."""
+    crop = {CONF_CROP_ID: "c1", CONF_CROP_TYPE: "tomate", CONF_STAGE: "mid",
+            CONF_NB_PLANTS: 10, CONF_DENSITY: 2.0}
+    state = RuntimeConfigState(_options(**{CONF_CROPS: [crop]}))
+    state._cumulative_need = {"c1": 15.0}
+    state.cleanup_stale_crops()
+    assert state.cumulative_need == {"c1": pytest.approx(15.0)}
+
+
+# ---------------------------------------------------------------------------
+# Fix #D — __init__ : _cleanup_removed_crop_entities
+# ---------------------------------------------------------------------------
+
+def _patch_registry(entities, registry_mock):
+    return (
+        patch("custom_components.my_garden_irrigation.__init__.er.async_get",
+              return_value=registry_mock),
+        patch("custom_components.my_garden_irrigation.__init__.er.async_entries_for_config_entry",
+              return_value=entities),
+    )
+
+
+def test_cleanup_removes_nb_plants_orphan():
+    """unique_id {entry_id}_{crop_id}_nb_plants est supprimé si culture absente."""
+    from custom_components.my_garden_irrigation.__init__ import _cleanup_removed_crop_entities
+
+    crop_id = "550e8400-e29b-41d4-a716-446655440000"
+    entry_id = "entry-abc"
+    entry = MagicMock(); entry.entry_id = entry_id
+
+    entity = MagicMock()
+    entity.unique_id = f"{entry_id}_{crop_id}_nb_plants"
+    entity.entity_id = "number.crop_nb_plants"
+
+    registry = MagicMock()
+    p1, p2 = _patch_registry([entity], registry)
+    with p1, p2:
+        _cleanup_removed_crop_entities(MagicMock(), entry, set())
+    registry.async_remove.assert_called_once_with(entity.entity_id)
+
+
+def test_cleanup_preserves_current_crop():
+    """L'entité d'une culture encore présente n'est pas supprimée."""
+    from custom_components.my_garden_irrigation.__init__ import _cleanup_removed_crop_entities
+
+    crop_id = "550e8400-e29b-41d4-a716-446655440000"
+    entry_id = "entry-abc"
+    entry = MagicMock(); entry.entry_id = entry_id
+
+    entity = MagicMock()
+    entity.unique_id = f"{entry_id}_{crop_id}_nb_plants"
+
+    registry = MagicMock()
+    p1, p2 = _patch_registry([entity], registry)
+    with p1, p2:
+        _cleanup_removed_crop_entities(MagicMock(), entry, {crop_id})
+    registry.async_remove.assert_not_called()
+
+
+def test_cleanup_preserves_global_entities():
+    """Les entités globales (eto, total, flow_rate) ne sont jamais supprimées."""
+    from custom_components.my_garden_irrigation.__init__ import _cleanup_removed_crop_entities
+
+    entry_id = "entry-abc"
+    entry = MagicMock(); entry.entry_id = entry_id
+
+    globals_ = [
+        MagicMock(unique_id=f"{entry_id}_eto",              entity_id="sensor.eto"),
+        MagicMock(unique_id=f"{entry_id}_total_cumulative", entity_id="sensor.total"),
+        MagicMock(unique_id=f"{entry_id}_global_flow_rate", entity_id="number.flow"),
+        MagicMock(unique_id=f"{entry_id}_next_watering",    entity_id="sensor.next"),
+    ]
+    registry = MagicMock()
+    p1, p2 = _patch_registry(globals_, registry)
+    with p1, p2:
+        _cleanup_removed_crop_entities(MagicMock(), entry, set())
+    registry.async_remove.assert_not_called()
+
+
+def test_cleanup_removes_irrigation_sensor_no_suffix():
+    """IrrigationDataSensor (unique_id = {entry_id}_{uuid}) est aussi nettoyé."""
+    from custom_components.my_garden_irrigation.__init__ import _cleanup_removed_crop_entities
+
+    crop_id = "550e8400-e29b-41d4-a716-446655440000"
+    entry_id = "entry-abc"
+    entry = MagicMock(); entry.entry_id = entry_id
+
+    entity = MagicMock()
+    entity.unique_id = f"{entry_id}_{crop_id}"  # pas de suffix
+    entity.entity_id = "sensor.irrigation_data"
+
+    registry = MagicMock()
+    p1, p2 = _patch_registry([entity], registry)
+    with p1, p2:
+        _cleanup_removed_crop_entities(MagicMock(), entry, set())
+    registry.async_remove.assert_called_once_with(entity.entity_id)
