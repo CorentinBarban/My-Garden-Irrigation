@@ -68,15 +68,23 @@
         "data": {
           "watering_frequency": "Bewässerungsfrequenz",
           "watering_interval_days": "Intervall zwischen Bewässerungen",
-          "watering_mode": "Bewässerungsmodus",
-          "cycles_count": "Anzahl der Zyklen (Fraktionierter Modus)",
-          "soak_duration_minutes": "Einweichzeit zwischen Zyklen (min)"
+          "watering_mode": "Bewässerungsmodus"
         },
         "data_description": {
           "watering_interval_days": "Nur bei Frequenz 'Festes Intervall' verwendet.",
-          "watering_mode": "Im fraktionierten Modus wird die Bewässerung in Zyklen aufgeteilt.",
-          "cycles_count": "Anzahl der aufeinanderfolgenden Bewässerungszyklen. Nur im fraktionierten Modus.",
-          "soak_duration_minutes": "Ruhezeit zwischen den Zyklen. Nur im fraktionierten Modus."
+          "watering_mode": "Im fraktionierten Modus ermöglicht ein weiterer Schritt die Konfiguration der Zyklen."
+        }
+      },
+      "fractioned_config": {
+        "title": "Einstellungen für den fraktionierten Modus",
+        "description": "Die Bewässerungsmenge wird in aufeinanderfolgende Zyklen aufgeteilt, um die Bodeninfiltration zu verbessern.",
+        "data": {
+          "cycles_count": "Anzahl der Zyklen",
+          "soak_duration_minutes": "Einweichzeit zwischen Zyklen (min)"
+        },
+        "data_description": {
+          "cycles_count": "Die Gesamtbewässerungsdauer wird in N aufeinanderfolgende Zyklen aufgeteilt.",
+          "soak_duration_minutes": "Ruhezeit zwischen den Zyklen zur Bodeninfiltration."
         }
       },
       "auto_irrigation": {
@@ -91,7 +99,8 @@
       }
     },
     "error": {
-      "invalid_crop_name": "Der Bereichsname darf nicht leer sein."
+      "invalid_crop_name": "Der Bereichsname darf nicht leer sein.",
+      "invalid_density": "Die Dichte muss größer als 0 sein (Pflanzen/m²)."
     },
     "abort": {
       "no_crops": "Keine Kulturen konfiguriert. Fügen Sie zuerst eine Kultur hinzu."

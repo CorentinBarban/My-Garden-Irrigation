@@ -68,15 +68,23 @@
         "data": {
           "watering_frequency": "Frequenza di irrigazione",
           "watering_interval_days": "Intervallo tra le irrigazioni",
-          "watering_mode": "Modalità di irrigazione",
-          "cycles_count": "Numero di cicli (modalità frazionata)",
-          "soak_duration_minutes": "Tempo di pausa tra i cicli (min)"
+          "watering_mode": "Modalità di irrigazione"
         },
         "data_description": {
           "watering_interval_days": "Usato solo se la frequenza è 'Intervallo fisso'.",
-          "watering_mode": "In modalità Frazionata, l'irrigazione è suddivisa in cicli per migliorare l'infiltrazione.",
-          "cycles_count": "Numero di cicli di irrigazione successivi. Solo in modalità Frazionata.",
-          "soak_duration_minutes": "Tempo di pausa tra ogni ciclo. Solo in modalità Frazionata."
+          "watering_mode": "In modalità Frazionata, un passaggio aggiuntivo permetterà di configurare i cicli."
+        }
+      },
+      "fractioned_config": {
+        "title": "Impostazioni modalità frazionata",
+        "description": "La dose di irrigazione sarà suddivisa in cicli successivi per migliorare l'infiltrazione del suolo.",
+        "data": {
+          "cycles_count": "Numero di cicli",
+          "soak_duration_minutes": "Tempo di pausa tra i cicli (min)"
+        },
+        "data_description": {
+          "cycles_count": "La durata totale dell'irrigazione sarà divisa in N cicli successivi.",
+          "soak_duration_minutes": "Tempo di pausa tra ogni ciclo per consentire l'infiltrazione nel suolo."
         }
       },
       "auto_irrigation": {
@@ -91,7 +99,8 @@
       }
     },
     "error": {
-      "invalid_crop_name": "Il nome dell'area non può essere vuoto."
+      "invalid_crop_name": "Il nome dell'area non può essere vuoto.",
+      "invalid_density": "La densità deve essere maggiore di 0 (piante/m²)."
     },
     "abort": {
       "no_crops": "Nessuna coltura configurata. Aggiungi prima una coltura."

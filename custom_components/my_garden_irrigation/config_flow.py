@@ -142,11 +142,14 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
             # Validation backend : interdit les noms vides ou contenant uniquement des espaces
             crop_name_raw = user_input.get(CONF_CROP_NAME, "")
             try:
-                vol.Schema(
-                    vol.All(str, vol.Strip, vol.Length(min=1))
-                )(crop_name_raw)
+                vol.Schema(vol.All(str, vol.Strip, vol.Length(min=1)))(crop_name_raw)
             except vol.Invalid:
                 errors[CONF_CROP_NAME] = "invalid_crop_name"
+
+            # Validation backend : densité > 0 (division par zéro dans compute_surface_m2 sinon)
+            density_raw = float(user_input.get(CONF_DENSITY, 0))
+            if density_raw <= 0:
+                errors[CONF_DENSITY] = "invalid_density"
 
             if not errors:
                 crop_type = user_input[CONF_CROP_TYPE]
@@ -286,23 +289,15 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
             if interval is not None:
                 self._watering_interval_days = int(interval)
 
-            # Module 5 : si mode fractionné, capture les paramètres optionnels
+            # Module 5 : si mode fractionné → étape dédiée, sinon sauvegarde directe
             if self._watering_mode == WATERING_MODE_FRACTIONED:
-                cycles = user_input.get(CONF_CYCLES_COUNT)
-                soak = user_input.get(CONF_SOAK_DURATION)
-                if cycles is not None:
-                    self._cycles_count = int(cycles)
-                if soak is not None:
-                    self._soak_duration = int(soak)
-
+                return await self.async_step_fractioned_config()
             return self._save()
 
         suggested: dict[str, Any] = {
             CONF_WATERING_FREQUENCY: self._watering_frequency,
             CONF_WATERING_MODE: self._watering_mode,
             CONF_WATERING_INTERVAL_DAYS: self._watering_interval_days,
-            CONF_CYCLES_COUNT: self._cycles_count,
-            CONF_SOAK_DURATION: self._soak_duration,
         }
         schema = vol.Schema(
             {
@@ -323,11 +318,38 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
                         translation_key="watering_mode",
                     )
                 ),
-                # Module 5 : champs optionnels du mode fractionné
+            }
+        )
+        return self.async_show_form(
+            step_id="watering_config",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+        )
+
+    # ------------------------------------------------------------------
+    # Module 5 — Paramètres du mode fractionné (étape conditionnelle)
+    # ------------------------------------------------------------------
+
+    async def async_step_fractioned_config(
+        self, user_input: dict | None = None
+    ) -> ConfigFlowResult:
+        """Affiché uniquement si le mode fractionné est sélectionné."""
+        if user_input is not None:
+            cycles = user_input.get(CONF_CYCLES_COUNT)
+            soak = user_input.get(CONF_SOAK_DURATION)
+            if cycles is not None:
+                self._cycles_count = int(cycles)
+            if soak is not None:
+                self._soak_duration = int(soak)
+            return self._save()
+
+        suggested: dict[str, Any] = {
+            CONF_CYCLES_COUNT: self._cycles_count,
+            CONF_SOAK_DURATION: self._soak_duration,
+        }
+        schema = vol.Schema(
+            {
                 vol.Optional(CONF_CYCLES_COUNT): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        min=1, max=10, step=1, mode="box"
-                    )
+                    selector.NumberSelectorConfig(min=1, max=10, step=1, mode="box")
                 ),
                 vol.Optional(CONF_SOAK_DURATION): selector.NumberSelector(
                     selector.NumberSelectorConfig(
@@ -337,7 +359,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
             }
         )
         return self.async_show_form(
-            step_id="watering_config",
+            step_id="fractioned_config",
             data_schema=self.add_suggested_values_to_schema(schema, suggested),
         )
 

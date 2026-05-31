@@ -68,15 +68,23 @@
         "data": {
           "watering_frequency": "Fréquence d'arrosage",
           "watering_interval_days": "Intervalle entre deux arrosages",
-          "watering_mode": "Mode d'arrosage",
-          "cycles_count": "Nombre de cycles (mode fractionné)",
-          "soak_duration_minutes": "Temps de repos entre cycles (min)"
+          "watering_mode": "Mode d'arrosage"
         },
         "data_description": {
           "watering_interval_days": "Utilisé uniquement si la fréquence est « Intervalle fixe ».",
-          "watering_mode": "En mode Fractionné, la consigne est découpée en cycles pour favoriser l'infiltration.",
-          "cycles_count": "Nombre de cycles d'arrosage successifs. Utilisé uniquement en mode Fractionné.",
-          "soak_duration_minutes": "Durée de repos entre chaque cycle. Utilisé uniquement en mode Fractionné."
+          "watering_mode": "En mode Fractionné, une étape supplémentaire vous permettra de configurer les cycles."
+        }
+      },
+      "fractioned_config": {
+        "title": "Paramètres du mode fractionné",
+        "description": "La consigne d'arrosage sera découpée en cycles successifs pour favoriser l'infiltration du sol.",
+        "data": {
+          "cycles_count": "Nombre de cycles",
+          "soak_duration_minutes": "Temps de repos entre cycles (min)"
+        },
+        "data_description": {
+          "cycles_count": "La durée totale d'arrosage sera divisée en N cycles successifs.",
+          "soak_duration_minutes": "Durée de repos entre chaque cycle pour permettre l'infiltration."
         }
       },
       "auto_irrigation": {
@@ -91,7 +99,8 @@
       }
     },
     "error": {
-      "invalid_crop_name": "Le nom de la parcelle ne peut pas être vide."
+      "invalid_crop_name": "Le nom de la parcelle ne peut pas être vide.",
+      "invalid_density": "La densité doit être supérieure à 0 (plants/m²)."
     },
     "abort": {
       "no_crops": "Aucune culture configurée. Ajoutez d'abord une culture."

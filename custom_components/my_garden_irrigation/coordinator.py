@@ -23,10 +23,7 @@ from homeassistant.util import dt as dt_util
 
 from .config_state import RuntimeConfigState
 from .const import (
-    CONF_DENSITY,
-    CONF_NB_PLANTS,
     DOMAIN,
-    MAX_REASONABLE_SURFACE_M2,
     OPEN_METEO_TIMEOUT,
     OPEN_METEO_URL,
     WATERING_MODE_FRACTIONED,
@@ -187,6 +184,10 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         """Émet l'événement HA que le blueprint d'automatisation écoute."""
         data = self.data
         if data is None:
+            _LOGGER.warning(
+                "Arrosage impossible : les données météo ne sont pas encore disponibles. "
+                "Attendez le premier cycle de mise à jour (toutes les heures) avant de déclencher l'arrosage."
+            )
             return
 
         total_cumulative = sum(data.cumulative_need.values())
@@ -234,7 +235,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     async def _async_update_data(self) -> IrrigationData:
         """Récupère ETo et précipitations puis calcule les besoins nets."""
         eto_mm, precipitation_mm = await self._fetch_weather()
-        self._warn_unreasonable_surfaces()
+        self.config.warn_unreasonable_surfaces()
         return compute_irrigation_data(
             crops=self.config.crops,
             kc_data=self._kc_data,
@@ -301,16 +302,3 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             )
         )
 
-    def _warn_unreasonable_surfaces(self) -> None:
-        for crop in self.config.crops:
-            nb_plants = crop.get(CONF_NB_PLANTS, 0)
-            density = crop.get(CONF_DENSITY, 1)
-            if density > 0 and (nb_plants / density) > MAX_REASONABLE_SURFACE_M2:
-                _LOGGER.warning(
-                    "Surface calculée (%s m²) anormalement élevée pour '%s' — "
-                    "vérifiez nb_plants (%s) et densité (%s).",
-                    round(nb_plants / density),
-                    crop.get("crop_type"),
-                    nb_plants,
-                    density,
-                )

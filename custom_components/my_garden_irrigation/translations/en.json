@@ -68,15 +68,23 @@
         "data": {
           "watering_frequency": "Watering frequency",
           "watering_interval_days": "Interval between waterings",
-          "watering_mode": "Watering mode",
-          "cycles_count": "Number of cycles (fractioned mode)",
-          "soak_duration_minutes": "Soak time between cycles (min)"
+          "watering_mode": "Watering mode"
         },
         "data_description": {
           "watering_interval_days": "Used only when frequency is set to Fixed interval.",
-          "watering_mode": "In Fractioned mode, the watering dose is split into cycles to improve soil infiltration.",
-          "cycles_count": "Number of successive watering cycles. Only used in Fractioned mode.",
-          "soak_duration_minutes": "Rest time between each cycle. Only used in Fractioned mode."
+          "watering_mode": "In Fractioned mode, an additional step will let you configure the cycles."
+        }
+      },
+      "fractioned_config": {
+        "title": "Fractioned mode settings",
+        "description": "The irrigation dose will be split into successive cycles to improve soil infiltration.",
+        "data": {
+          "cycles_count": "Number of cycles",
+          "soak_duration_minutes": "Soak time between cycles (min)"
+        },
+        "data_description": {
+          "cycles_count": "The total irrigation duration will be split into N successive cycles.",
+          "soak_duration_minutes": "Rest time between each cycle to allow soil infiltration."
         }
       },
       "auto_irrigation": {
@@ -91,7 +99,8 @@
       }
     },
     "error": {
-      "invalid_crop_name": "Plot name cannot be empty."
+      "invalid_crop_name": "Plot name cannot be empty.",
+      "invalid_density": "Density must be greater than 0 (plants/m²)."
     },
     "abort": {
       "no_crops": "No crops configured. Add a crop first."

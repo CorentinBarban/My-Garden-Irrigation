@@ -30,6 +30,7 @@ from .const import (
     DEFAULT_CYCLES_COUNT,
     DEFAULT_IRRIGATION_TIME,
     DEFAULT_SOAK_DURATION_MINUTES,
+    MAX_REASONABLE_SURFACE_M2,
 )
 from .core.calculations import compute_surface_m2
 from .core.ledger import midnight_transfer
@@ -320,6 +321,21 @@ class RuntimeConfigState:
             )
             for crop in self._crop_data
         }
+
+    def warn_unreasonable_surfaces(self) -> None:
+        """Logue un avertissement si la surface calculée d'une culture est anormalement élevée."""
+        for crop in self._crop_data:
+            nb_plants = crop.get(CONF_NB_PLANTS, 0)
+            density = crop.get(CONF_DENSITY, 1)
+            if density > 0 and (nb_plants / density) > MAX_REASONABLE_SURFACE_M2:
+                _LOGGER.warning(
+                    "Surface calculée (%s m²) anormalement élevée pour '%s' — "
+                    "vérifiez nb_plants (%s) et densité (%s).",
+                    round(nb_plants / density),
+                    crop.get("crop_type"),
+                    nb_plants,
+                    density,
+                )
 
     def _get_crop_ids(self) -> list[str]:
         return [crop[CONF_CROP_ID] for crop in self._crop_data]
