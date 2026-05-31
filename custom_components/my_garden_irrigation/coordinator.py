@@ -24,11 +24,15 @@ from homeassistant.util import dt as dt_util
 
 from .config_state import RuntimeConfigState
 from .const import (
+    CONF_DENSITY,
+    CONF_NB_PLANTS,
     DOMAIN,
     OPEN_METEO_TIMEOUT,
     OPEN_METEO_URL,
     WATERING_MODE_FRACTIONED,
 )
+
+_SURFACE_FIELDS = frozenset({CONF_NB_PLANTS, CONF_DENSITY})
 from .core.calculations import compute_irrigation_data
 from .core.kc_data import get_kc
 from .core.models import IrrigationData
@@ -144,8 +148,29 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     # ------------------------------------------------------------------
 
     def update_crop_field(self, crop_id: str, field: str, value: object) -> None:
+        """Mise à jour silencieuse — réservée à async_added_to_hass (restauration boot)."""
         self.config.update_crop_field(crop_id, field, value)
         self._schedule_config_save()
+
+    async def async_update_crop_field(
+        self, crop_id: str, field: str, value: object
+    ) -> None:
+        """Action utilisateur : met à jour un champ, rescale le cumulatif, rafraîchit."""
+        if field in _SURFACE_FIELDS and crop_id in self.config.cumulative_need:
+            old_surface = self.config.get_crop_surfaces().get(crop_id, 0.0)
+            self.config.update_crop_field(crop_id, field, value)
+            new_surface = self.config.get_crop_surfaces().get(crop_id, 0.0)
+            if old_surface > 0 and new_surface > 0:
+                scale = new_surface / old_surface
+                self.config._cumulative_need[crop_id] = round(
+                    self.config.cumulative_need[crop_id] * scale, 3
+                )
+        else:
+            self.config.update_crop_field(crop_id, field, value)
+        await self._persistence.async_save(
+            self.config.to_storage(dt_util.now().date().isoformat())
+        )
+        await self.async_refresh()
 
     def set_flow_rate(self, value: float) -> None:
         self.config.set_flow_rate(value)

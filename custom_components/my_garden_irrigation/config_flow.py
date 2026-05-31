@@ -118,6 +118,21 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
     async def async_step_init(
         self, user_input: dict | None = None  # noqa: ARG002
     ) -> ConfigFlowResult:
+        # Synchronise les valeurs depuis le coordinator live (si disponible) pour que
+        # le formulaire reflète les changements effectués via les entités HA.
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if coordinator is not None:
+            cfg = coordinator.config
+            self._flow_rate = cfg.flow_rate
+            self._valve_entity_id = cfg.valve_entity_id
+            self._watering_frequency = cfg.watering_frequency
+            self._watering_mode = cfg.watering_mode
+            self._watering_interval_days = cfg.watering_interval_days
+            self._irrigation_time = cfg.irrigation_time
+            self._cycles_count = cfg.cycles_count
+            self._soak_duration = cfg.soak_duration_minutes
+            self._crops = list(cfg.crops)
+
         return self.async_show_menu(
             step_id="init",
             menu_options=[

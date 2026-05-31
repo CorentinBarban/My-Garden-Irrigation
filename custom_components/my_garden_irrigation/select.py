@@ -80,9 +80,8 @@ class StageSelect(SelectEntity, RestoreEntity):
 
     async def async_select_option(self, option: str) -> None:
         self._current = option
-        self._coordinator.update_crop_field(self._crop_id, CONF_STAGE, option)
         self.async_write_ha_state()
-        await self._coordinator.async_request_refresh()
+        await self._coordinator.async_update_crop_field(self._crop_id, CONF_STAGE, option)
 
 
 class WateringFrequencySelect(SelectEntity):

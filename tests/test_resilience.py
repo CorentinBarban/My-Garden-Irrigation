@@ -374,3 +374,179 @@ def test_valve_tracker_warns_when_no_valve_id(caplog):
 
     assert "Aucune vanne globale configurée" in caplog.text
     cleanup()  # le callable de nettoyage ne doit pas crasher
+
+
+# ---------------------------------------------------------------------------
+# Cohérence #A — async_update_crop_field : rescalage cumulatif proportionnel
+# ---------------------------------------------------------------------------
+
+def _crop_options(crop_id="c1", nb_plants=10, density=2.0):
+    """Options avec une culture pré-configurée."""
+    crop = {
+        CONF_CROP_ID: crop_id,
+        CONF_CROP_TYPE: "tomate",
+        CONF_STAGE: "mid",
+        CONF_NB_PLANTS: nb_plants,
+        CONF_DENSITY: density,
+    }
+    return _options(**{CONF_CROPS: [crop]})
+
+
+def test_async_update_nb_plants_scales_cumulative():
+    """Doubler nb_plants → surface double → cumulatif doublé proportionnellement."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        def __init__(self) -> None:
+            self.config = RuntimeConfigState(_crop_options(nb_plants=10, density=2.0))
+            # Surface initiale = 10/2 = 5 m² → cumulatif de départ = 20 L
+            self.config._cumulative_need = {"c1": 20.0}
+            self._persistence = MagicMock()
+            self._persistence.async_save = AsyncMock()
+            self.async_refresh = AsyncMock()
+
+    coord = FakeCoord()
+    with patch("custom_components.my_garden_irrigation.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value.isoformat.return_value = "2026-05-31"
+        _run(IrrigationCoordinator.async_update_crop_field(coord, "c1", CONF_NB_PLANTS, 20))
+
+    # Surface nouvelle = 20/2 = 10 m² → scale = 10/5 = 2 → cumulatif = 40 L
+    assert coord.config.cumulative_need["c1"] == pytest.approx(40.0, abs=0.01)
+    coord.async_refresh.assert_awaited_once()
+
+
+def test_async_update_density_scales_cumulative():
+    """Doubler la densité → surface divisée par 2 → cumulatif divisé par 2."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        def __init__(self) -> None:
+            self.config = RuntimeConfigState(_crop_options(nb_plants=10, density=2.0))
+            self.config._cumulative_need = {"c1": 20.0}
+            self._persistence = MagicMock()
+            self._persistence.async_save = AsyncMock()
+            self.async_refresh = AsyncMock()
+
+    coord = FakeCoord()
+    with patch("custom_components.my_garden_irrigation.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value.isoformat.return_value = "2026-05-31"
+        _run(IrrigationCoordinator.async_update_crop_field(coord, "c1", CONF_DENSITY, 4.0))
+
+    # Surface nouvelle = 10/4 = 2.5 m², ancienne = 5 m² → scale = 0.5 → cumulatif = 10 L
+    assert coord.config.cumulative_need["c1"] == pytest.approx(10.0, abs=0.01)
+
+
+def test_async_update_stage_no_cumulative_scaling():
+    """Changer le stage (Kc change, pas la surface) → cumulatif inchangé."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        def __init__(self) -> None:
+            self.config = RuntimeConfigState(_crop_options())
+            self.config._cumulative_need = {"c1": 20.0}
+            self._persistence = MagicMock()
+            self._persistence.async_save = AsyncMock()
+            self.async_refresh = AsyncMock()
+
+    coord = FakeCoord()
+    with patch("custom_components.my_garden_irrigation.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value.isoformat.return_value = "2026-05-31"
+        _run(IrrigationCoordinator.async_update_crop_field(coord, "c1", CONF_STAGE, "end"))
+
+    # Le stage ne modifie pas la surface → cumulatif doit rester à 20 L
+    assert coord.config.cumulative_need["c1"] == pytest.approx(20.0)
+    coord.async_refresh.assert_awaited_once()
+
+
+def test_async_update_no_cumulative_when_zero_old_surface():
+    """Si l'ancienne surface est 0, pas de rescalage (évite division par zéro)."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        def __init__(self) -> None:
+            # density=0 n'est pas permis via le formulaire, mais on teste la robustesse
+            from custom_components.my_garden_irrigation.config_state import RuntimeConfigState as RCS
+            opts = _crop_options(nb_plants=0, density=2.0)
+            self.config = RCS(opts)
+            self.config._cumulative_need = {"c1": 15.0}
+            self._persistence = MagicMock()
+            self._persistence.async_save = AsyncMock()
+            self.async_refresh = AsyncMock()
+
+    coord = FakeCoord()
+    with patch("custom_components.my_garden_irrigation.coordinator.dt_util") as mock_dt:
+        mock_dt.now.return_value.date.return_value.isoformat.return_value = "2026-05-31"
+        _run(IrrigationCoordinator.async_update_crop_field(coord, "c1", CONF_NB_PLANTS, 10))
+
+    # Pas de crash — le cumulatif peut avoir changé mais aucune exception
+    coord.async_refresh.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Cohérence #B — config flow sync depuis coordinator live
+# ---------------------------------------------------------------------------
+
+def test_options_flow_init_syncs_from_coordinator():
+    """async_step_init doit écraser les valeurs entry.options par celles du coordinator."""
+    from unittest.mock import PropertyMock
+    from custom_components.my_garden_irrigation.config_flow import IrrigationOptionsFlowHandler
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.options = {
+        CONF_CROPS: [],
+        CONF_GLOBAL_FLOW_RATE: 100.0,  # valeur stale dans entry.options
+        CONF_IRRIGATION_TIME: "06:00:00",
+        CONF_WATERING_FREQUENCY: "daily",
+        CONF_WATERING_MODE: "continuous",
+        CONF_WATERING_INTERVAL_DAYS: 2,
+        CONF_CYCLES_COUNT: 3,
+        CONF_SOAK_DURATION: 15,
+    }
+
+    handler = IrrigationOptionsFlowHandler(entry)
+    assert handler._flow_rate == pytest.approx(100.0)  # valeur stale
+
+    # Coordinator live avec une valeur différente
+    live_config = _make_state(**{CONF_GLOBAL_FLOW_RATE: 450.0})
+    coordinator = MagicMock()
+    coordinator.config = live_config
+
+    handler.hass = MagicMock()
+    handler.hass.data = {"my_garden_irrigation": {"test_entry": coordinator}}
+
+    # Patcher config_entry (property HA, non settable directement en test)
+    with patch.object(type(handler), "config_entry", new_callable=PropertyMock, return_value=entry):
+        _run(handler.async_step_init())
+
+    # La valeur live doit avoir écrasé la valeur stale
+    assert handler._flow_rate == pytest.approx(450.0)
+
+
+def test_options_flow_init_graceful_when_no_coordinator():
+    """async_step_init ne plante pas si le coordinator n'est pas encore disponible."""
+    from unittest.mock import PropertyMock
+    from custom_components.my_garden_irrigation.config_flow import IrrigationOptionsFlowHandler
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry"
+    entry.options = {
+        CONF_CROPS: [],
+        CONF_GLOBAL_FLOW_RATE: 200.0,
+        CONF_IRRIGATION_TIME: "06:00:00",
+        CONF_WATERING_FREQUENCY: "daily",
+        CONF_WATERING_MODE: "continuous",
+        CONF_WATERING_INTERVAL_DAYS: 2,
+        CONF_CYCLES_COUNT: 3,
+        CONF_SOAK_DURATION: 15,
+    }
+
+    handler = IrrigationOptionsFlowHandler(entry)
+    handler.hass = MagicMock()
+    handler.hass.data = {}  # coordinator absent
+
+    with patch.object(type(handler), "config_entry", new_callable=PropertyMock, return_value=entry):
+        _run(handler.async_step_init())
+
+    # Sans coordinator, la valeur entry.options est conservée
+    assert handler._flow_rate == pytest.approx(200.0)
