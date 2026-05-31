@@ -23,38 +23,108 @@
         "title": "Garten verwalten",
         "menu_options": {
           "add_crop": "Kultur hinzufügen",
-          "remove_crop": "Kultur entfernen"
+          "remove_crop": "Kultur entfernen",
+          "valve_config": "Globalventil konfigurieren",
+          "watering_config": "Bewässerungsfrequenz und -modus",
+          "auto_irrigation": "Automatische Bewässerung"
         }
       },
       "add_crop": {
         "title": "Kultur hinzufügen",
+        "description": "Geben Sie diesem Bereich einen Namen, wählen Sie die Kultur, ihre Wachstumsphase und die Pflanzenanzahl. Die FAO-Dichte ist vorausgefüllt — passen Sie sie an, wenn Ihr Abstand abweicht.",
         "data": {
           "crop_name": "Name des Bereichs",
           "crop_type": "Kultur",
           "stage": "Wachstumsphase",
           "nb_plants": "Anzahl der Pflanzen",
           "density": "Pflanzdichte (Pflanzen/m²)"
+        },
+        "data_description": {
+          "density": "FAO-Standarddichte: {fao_densities}"
         }
       },
       "remove_crop": {
         "title": "Kultur entfernen",
+        "description": "{crops_count} Kultur(en) konfiguriert. Wählen Sie die zu entfernende.",
         "data": {
           "crop_id": "Zu entfernende Kultur"
         }
+      },
+      "valve_config": {
+        "title": "Globales Gartenventil",
+        "description": "Wählen Sie die Ventil- oder Schalter-Entität, die Ihr Bewässerungsnetz speist, und geben Sie den Gesamtdurchfluss Ihrer Anlage ein.",
+        "data": {
+          "global_valve_entity_id": "Ventil / Schalter-Entität",
+          "global_flow_rate": "Anlagendurchfluss (L/h)"
+        },
+        "data_description": {
+          "global_valve_entity_id": "Leer lassen, wenn Sie keine automatische Bewässerungsverfolgung wünschen.",
+          "global_flow_rate": "Gesamtstündlicher Durchfluss bei geöffnetem Ventil."
+        }
+      },
+      "watering_config": {
+        "title": "Bewässerungsfrequenz und -modus",
+        "description": "Legen Sie fest, wie oft und wie Ihr Garten bewässert wird.",
+        "data": {
+          "watering_frequency": "Bewässerungsfrequenz",
+          "watering_interval_days": "Intervall zwischen Bewässerungen",
+          "watering_mode": "Bewässerungsmodus",
+          "cycles_count": "Anzahl der Zyklen (Fraktionierter Modus)",
+          "soak_duration_minutes": "Einweichzeit zwischen Zyklen (min)"
+        },
+        "data_description": {
+          "watering_interval_days": "Nur bei Frequenz 'Festes Intervall' verwendet.",
+          "watering_mode": "Im fraktionierten Modus wird die Bewässerung in Zyklen aufgeteilt.",
+          "cycles_count": "Anzahl der aufeinanderfolgenden Bewässerungszyklen. Nur im fraktionierten Modus.",
+          "soak_duration_minutes": "Ruhezeit zwischen den Zyklen. Nur im fraktionierten Modus."
+        }
+      },
+      "auto_irrigation": {
+        "title": "Automatische Bewässerung",
+        "description": "Legen Sie die Uhrzeit fest, zu der die Zentrale das automatische Bewässerungsereignis auslöst. Verwenden Sie das bereitgestellte Automatisierungs-Blueprint, um dieses Ereignis mit Ihrem physischen Ventil zu verknüpfen.",
+        "data": {
+          "irrigation_time": "Auslösezeit"
+        },
+        "data_description": {
+          "irrigation_time": "Das Bewässerungsereignis wird täglich zu dieser Zeit ausgelöst."
+        }
       }
+    },
+    "error": {
+      "invalid_crop_name": "Der Bereichsname darf nicht leer sein."
     },
     "abort": {
       "no_crops": "Keine Kulturen konfiguriert. Fügen Sie zuerst eine Kultur hinzu."
     }
   },
   "entity": {
+    "sensor": {
+      "irrigation": { "name": "Bewässerung" },
+      "cumulative_need": { "name": "Kumulierter Bedarf" },
+      "kc": { "name": "Kc" },
+      "eto": { "name": "ETo" },
+      "total_daily": { "name": "Tagesbedarf" },
+      "total_cumulative": { "name": "Kumulierter Bedarf" },
+      "precipitation_daily": { "name": "Tägliche Niederschläge" },
+      "next_watering": { "name": "Nächste Bewässerung" }
+    },
+    "button": {
+      "reset_irrigation": { "name": "Bewässerung zurücksetzen" },
+      "start_irrigation_now": { "name": "Bewässerung jetzt starten" }
+    },
+    "switch": {
+      "auto_irrigation": { "name": "Automatische Bewässerung" }
+    },
+    "time": {
+      "irrigation_time": { "name": "Bewässerungszeit" }
+    },
     "number": {
-      "nb_plants": {
-        "name": "Anzahl der Pflanzen"
-      },
-      "density": {
-        "name": "Dichte (Pflanzen/m²)"
-      }
+      "nb_plants": { "name": "Anzahl der Pflanzen" },
+      "density": { "name": "Dichte (Pflanzen/m²)" },
+      "global_flow_rate": { "name": "Anlagendurchfluss" },
+      "watering_interval_days": { "name": "Intervall zwischen Bewässerungen" },
+      "cycles_count": { "name": "Anzahl der Zyklen" },
+      "soak_duration": { "name": "Pause zwischen Zyklen" }
     },
     "select": {
       "stage": {
@@ -63,6 +133,20 @@
           "ini": "Anfangsphase (Keimung / Etablierung)",
           "mid": "Mittlere Saison (volle Entwicklung)",
           "end": "Späte Saison (Reifung)"
+        }
+      },
+      "watering_frequency": {
+        "name": "Bewässerungsfrequenz",
+        "state": {
+          "daily": "Täglich",
+          "interval": "Festes Intervall von X Tagen"
+        }
+      },
+      "watering_mode": {
+        "name": "Bewässerungsmodus",
+        "state": {
+          "continuous": "Kontinuierlich",
+          "fractioned": "Fraktioniert / Zyklisch"
         }
       }
     }
@@ -104,6 +188,18 @@
         "ini": "Anfangsphase (Keimung / Etablierung)",
         "mid": "Mittlere Saison (volle Entwicklung)",
         "end": "Späte Saison (Reifung)"
+      }
+    },
+    "watering_frequency": {
+      "options": {
+        "daily": "Täglich",
+        "interval": "Festes Intervall von X Tagen"
+      }
+    },
+    "watering_mode": {
+      "options": {
+        "continuous": "Kontinuierlich",
+        "fractioned": "Fraktioniert / Zyklisch"
       }
     }
   }

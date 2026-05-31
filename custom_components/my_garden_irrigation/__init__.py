@@ -6,7 +6,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 
-from .const import CONF_CROPS, DOMAIN, OPTIONS_FIELD_UPDATE_FLAG, PLATFORMS, SERVICE_RECALCULATE
+from .const import CONF_CROPS, DOMAIN, PLATFORMS, SERVICE_RECALCULATE
 from .coordinator import IrrigationCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,10 +21,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Rechargement automatique si les options changent (ajout/suppression de culture)
-    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
-
-    # Service recalculate (enregistré une seule fois pour le domaine)
     if not hass.services.has_service(DOMAIN, SERVICE_RECALCULATE):
         async def _handle_recalculate(_call: ServiceCall) -> None:
             for coord in hass.data.get(DOMAIN, {}).values():
@@ -43,7 +39,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         hass.data[DOMAIN].pop(entry.entry_id)
 
-    # Désenregistre le service quand la dernière entrée est retirée
     if not hass.data[DOMAIN]:
         hass.services.async_remove(DOMAIN, SERVICE_RECALCULATE)
 
@@ -58,16 +53,3 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(entry, options=new_options, version=2)
         _LOGGER.info("Migration v1→v2 : eto_entity_id retiré des options.")
     return True
-
-
-async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Rechargement déclenché par un changement d'options.
-
-    Un simple ajustement du nombre de plants ne nécessite pas de rechargement complet :
-    le coordinateur est rafraîchi directement par NbPlantsNumber.async_set_native_value.
-    """
-    field_flags: set = hass.data.get(DOMAIN, {}).get(OPTIONS_FIELD_UPDATE_FLAG, set())
-    if entry.entry_id in field_flags:
-        field_flags.discard(entry.entry_id)
-        return
-    await hass.config_entries.async_reload(entry.entry_id)

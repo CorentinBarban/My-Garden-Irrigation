@@ -45,6 +45,7 @@
       },
       "remove_crop": {
         "title": "Supprimer une culture",
+        "description": "{crops_count} culture(s) configurée(s). Sélectionnez celle à supprimer.",
         "data": {
           "crop_id": "Culture à supprimer"
         }
@@ -67,23 +68,30 @@
         "data": {
           "watering_frequency": "Fréquence d'arrosage",
           "watering_interval_days": "Intervalle entre deux arrosages",
-          "watering_mode": "Mode d'arrosage"
+          "watering_mode": "Mode d'arrosage",
+          "cycles_count": "Nombre de cycles (mode fractionné)",
+          "soak_duration_minutes": "Temps de repos entre cycles (min)"
         },
         "data_description": {
           "watering_interval_days": "Utilisé uniquement si la fréquence est « Intervalle fixe ».",
-          "watering_mode": "En mode Fractionné, la consigne est découpée en cycles pour favoriser l'infiltration."
+          "watering_mode": "En mode Fractionné, la consigne est découpée en cycles pour favoriser l'infiltration.",
+          "cycles_count": "Nombre de cycles d'arrosage successifs. Utilisé uniquement en mode Fractionné.",
+          "soak_duration_minutes": "Durée de repos entre chaque cycle. Utilisé uniquement en mode Fractionné."
         }
       },
       "auto_irrigation": {
         "title": "Arrosage automatique",
-        "description": "Définissez l'heure à laquelle la centrale déclenchera automatiquement l'arrosage. Activez ensuite le switch « Arrosage automatique » sur la centrale pour l'activer.",
+        "description": "Définissez l'heure à laquelle la centrale émettra l'événement d'arrosage automatique. Le blueprint d'automatisation fourni permet de lier cet événement à votre vanne physique. Activez ensuite le switch « Arrosage automatique » sur la centrale.",
         "data": {
           "irrigation_time": "Heure de déclenchement"
         },
         "data_description": {
-          "irrigation_time": "La séquence d'arrosage sera lancée à cette heure chaque jour (ou selon l'intervalle configuré)."
+          "irrigation_time": "L'événement d'arrosage sera émis à cette heure chaque jour (ou selon l'intervalle configuré)."
         }
       }
+    },
+    "error": {
+      "invalid_crop_name": "Le nom de la parcelle ne peut pas être vide."
     },
     "abort": {
       "no_crops": "Aucune culture configurée. Ajoutez d'abord une culture."
@@ -91,62 +99,32 @@
   },
   "entity": {
     "sensor": {
-      "irrigation": {
-        "name": "Irrigation"
-      },
-      "cumulative_need": {
-        "name": "Besoin cumulé"
-      },
-      "kc": {
-        "name": "Kc"
-      },
-      "eto": {
-        "name": "ETo"
-      },
-      "total_daily": {
-        "name": "Besoin journalier"
-      },
-      "total_cumulative": {
-        "name": "Besoin cumulé"
-      },
-      "precipitation_daily": {
-        "name": "Précipitations journalières"
-      },
-      "next_watering": {
-        "name": "Prochain arrosage"
-      }
+      "irrigation": { "name": "Irrigation" },
+      "cumulative_need": { "name": "Besoin cumulé" },
+      "kc": { "name": "Kc" },
+      "eto": { "name": "ETo" },
+      "total_daily": { "name": "Besoin journalier" },
+      "total_cumulative": { "name": "Besoin cumulé" },
+      "precipitation_daily": { "name": "Précipitations journalières" },
+      "next_watering": { "name": "Prochain arrosage" }
     },
     "button": {
-      "reset_irrigation": {
-        "name": "Réinitialiser l'irrigation"
-      },
-      "start_irrigation_now": {
-        "name": "Lancer l'arrosage maintenant"
-      }
+      "reset_irrigation": { "name": "Réinitialiser l'irrigation" },
+      "start_irrigation_now": { "name": "Lancer l'arrosage maintenant" }
     },
     "switch": {
-      "auto_irrigation": {
-        "name": "Arrosage automatique"
-      }
+      "auto_irrigation": { "name": "Arrosage automatique" }
     },
     "time": {
-      "irrigation_time": {
-        "name": "Heure d'arrosage"
-      }
+      "irrigation_time": { "name": "Heure d'arrosage" }
     },
     "number": {
-      "nb_plants": {
-        "name": "Nombre de plants"
-      },
-      "density": {
-        "name": "Densité (plants/m²)"
-      },
-      "global_flow_rate": {
-        "name": "Débit de l'installation"
-      },
-      "watering_interval_days": {
-        "name": "Intervalle entre arrosages"
-      }
+      "nb_plants": { "name": "Nombre de plants" },
+      "density": { "name": "Densité (plants/m²)" },
+      "global_flow_rate": { "name": "Débit de l'installation" },
+      "watering_interval_days": { "name": "Intervalle entre arrosages" },
+      "cycles_count": { "name": "Nombre de cycles" },
+      "soak_duration": { "name": "Repos entre cycles" }
     },
     "select": {
       "stage": {

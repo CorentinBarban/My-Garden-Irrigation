@@ -102,6 +102,9 @@ WATERING_MODES = [WATERING_MODE_CONTINUOUS, WATERING_MODE_FRACTIONED]
 DEFAULT_CYCLES_COUNT = 3
 DEFAULT_SOAK_DURATION_MINUTES = 15
 
+CONF_CYCLES_COUNT = "cycles_count"
+CONF_SOAK_DURATION = "soak_duration_minutes"
+
 # --- Attributs des sensors ---
 ATTR_CROP_TYPE = "crop_type"
 ATTR_STAGE = "stage"
@@ -140,9 +143,6 @@ KC_CACHE_KEY = f"{DOMAIN}_kc_data"
 # --- Arrosage automatique (planifié par la centrale) ---
 CONF_IRRIGATION_TIME = "irrigation_time"
 DEFAULT_IRRIGATION_TIME = "06:00:00"
-
-# --- Flag interne : mise à jour d'un champ sans rechargement complet ---
-OPTIONS_FIELD_UPDATE_FLAG = "_field_update"
 
 # --- Storage (ADR-008) ---
 STORAGE_VERSION = 1

@@ -23,38 +23,108 @@
         "title": "Gestionar su huerto",
         "menu_options": {
           "add_crop": "Añadir un cultivo",
-          "remove_crop": "Eliminar un cultivo"
+          "remove_crop": "Eliminar un cultivo",
+          "valve_config": "Configurar válvula global",
+          "watering_config": "Frecuencia y modo de riego",
+          "auto_irrigation": "Riego automático"
         }
       },
       "add_crop": {
         "title": "Añadir un cultivo",
+        "description": "Dé un nombre a esta parcela, seleccione el cultivo, su etapa de crecimiento y el número de plantas. La densidad FAO está pre-rellena — ajústela si su espaciado difiere.",
         "data": {
           "crop_name": "Nombre del área",
           "crop_type": "Cultivo",
           "stage": "Etapa de crecimiento",
           "nb_plants": "Número de plantas",
           "density": "Densidad de plantación (plantas/m²)"
+        },
+        "data_description": {
+          "density": "Densidad FAO por defecto: {fao_densities}"
         }
       },
       "remove_crop": {
         "title": "Eliminar un cultivo",
+        "description": "{crops_count} cultivo(s) configurado(s). Seleccione el que desea eliminar.",
         "data": {
           "crop_id": "Cultivo a eliminar"
         }
+      },
+      "valve_config": {
+        "title": "Válvula global del huerto",
+        "description": "Seleccione la entidad válvula o interruptor que alimenta su red de riego e introduzca el caudal total de su instalación.",
+        "data": {
+          "global_valve_entity_id": "Entidad válvula / interruptor",
+          "global_flow_rate": "Caudal de la instalación (L/h)"
+        },
+        "data_description": {
+          "global_valve_entity_id": "Deje vacío si no desea el seguimiento automático de los riegos.",
+          "global_flow_rate": "Caudal horario total cuando la válvula está abierta."
+        }
+      },
+      "watering_config": {
+        "title": "Frecuencia y modo de riego",
+        "description": "Defina con qué frecuencia y cómo se riega su huerto.",
+        "data": {
+          "watering_frequency": "Frecuencia de riego",
+          "watering_interval_days": "Intervalo entre riegos",
+          "watering_mode": "Modo de riego",
+          "cycles_count": "Número de ciclos (modo fraccionado)",
+          "soak_duration_minutes": "Tiempo de reposo entre ciclos (min)"
+        },
+        "data_description": {
+          "watering_interval_days": "Solo se usa si la frecuencia es 'Intervalo fijo'.",
+          "watering_mode": "En modo Fraccionado, el riego se divide en ciclos para mejorar la infiltración.",
+          "cycles_count": "Número de ciclos de riego sucesivos. Solo en modo Fraccionado.",
+          "soak_duration_minutes": "Tiempo de reposo entre cada ciclo. Solo en modo Fraccionado."
+        }
+      },
+      "auto_irrigation": {
+        "title": "Riego automático",
+        "description": "Establezca la hora a la que la central emitirá el evento de riego automático. Use el blueprint de automatización incluido para vincular este evento a su válvula física.",
+        "data": {
+          "irrigation_time": "Hora de activación"
+        },
+        "data_description": {
+          "irrigation_time": "El evento de riego se emitirá a esta hora cada día."
+        }
       }
+    },
+    "error": {
+      "invalid_crop_name": "El nombre del área no puede estar vacío."
     },
     "abort": {
       "no_crops": "No hay cultivos configurados. Añada primero un cultivo."
     }
   },
   "entity": {
+    "sensor": {
+      "irrigation": { "name": "Riego" },
+      "cumulative_need": { "name": "Necesidad acumulada" },
+      "kc": { "name": "Kc" },
+      "eto": { "name": "ETo" },
+      "total_daily": { "name": "Necesidad diaria" },
+      "total_cumulative": { "name": "Necesidad acumulada" },
+      "precipitation_daily": { "name": "Precipitaciones diarias" },
+      "next_watering": { "name": "Próximo riego" }
+    },
+    "button": {
+      "reset_irrigation": { "name": "Restablecer el riego" },
+      "start_irrigation_now": { "name": "Iniciar el riego ahora" }
+    },
+    "switch": {
+      "auto_irrigation": { "name": "Riego automático" }
+    },
+    "time": {
+      "irrigation_time": { "name": "Hora de riego" }
+    },
     "number": {
-      "nb_plants": {
-        "name": "Número de plantas"
-      },
-      "density": {
-        "name": "Densidad (plantas/m²)"
-      }
+      "nb_plants": { "name": "Número de plantas" },
+      "density": { "name": "Densidad (plantas/m²)" },
+      "global_flow_rate": { "name": "Caudal de la instalación" },
+      "watering_interval_days": { "name": "Intervalo entre riegos" },
+      "cycles_count": { "name": "Número de ciclos" },
+      "soak_duration": { "name": "Reposo entre ciclos" }
     },
     "select": {
       "stage": {
@@ -63,6 +133,20 @@
           "ini": "Inicial (germinación / establecimiento)",
           "mid": "Media estación (pleno desarrollo)",
           "end": "Final de estación (maduración)"
+        }
+      },
+      "watering_frequency": {
+        "name": "Frecuencia de riego",
+        "state": {
+          "daily": "Diario",
+          "interval": "Intervalo fijo de X días"
+        }
+      },
+      "watering_mode": {
+        "name": "Modo de riego",
+        "state": {
+          "continuous": "Continuo",
+          "fractioned": "Fraccionado / Ciclo e infiltración"
         }
       }
     }
@@ -104,6 +188,18 @@
         "ini": "Inicial (germinación / establecimiento)",
         "mid": "Media estación (pleno desarrollo)",
         "end": "Final de estación (maduración)"
+      }
+    },
+    "watering_frequency": {
+      "options": {
+        "daily": "Diario",
+        "interval": "Intervalo fijo de X días"
+      }
+    },
+    "watering_mode": {
+      "options": {
+        "continuous": "Continuo",
+        "fractioned": "Fraccionado / Ciclo e infiltración"
       }
     }
   }

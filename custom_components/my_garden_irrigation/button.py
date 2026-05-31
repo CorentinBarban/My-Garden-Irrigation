@@ -41,7 +41,7 @@ class ResetIrrigationButton(ButtonEntity):
 
 
 class StartIrrigationNowButton(ButtonEntity):
-    """Lance immédiatement la séquence d'arrosage basée sur le besoin cumulé."""
+    """Émet l'événement d'arrosage immédiat que le blueprint d'automatisation exécute."""
 
     _attr_has_entity_name = True
     _attr_attribution = ATTRIBUTION
@@ -54,4 +54,4 @@ class StartIrrigationNowButton(ButtonEntity):
         self._attr_device_info = _centrale_device_info(entry)
 
     async def async_press(self) -> None:
-        await self._coordinator.async_run_irrigation_sequence()
+        self._coordinator.fire_irrigation_event()

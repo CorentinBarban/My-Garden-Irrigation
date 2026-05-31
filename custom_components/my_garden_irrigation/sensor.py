@@ -39,15 +39,11 @@ from .const import (
     CONF_CROP_NAME,
     CONF_CROP_TYPE,
     CONF_CROPS,
-    CONF_GLOBAL_FLOW_RATE,
     CONF_IRRIGATION_TIME,
     CONF_NAME,
     CONF_WATERING_FREQUENCY,
     CONF_WATERING_INTERVAL_DAYS,
-    CONF_WATERING_MODE,
-    DEFAULT_CYCLES_COUNT,
     DEFAULT_IRRIGATION_TIME,
-    DEFAULT_SOAK_DURATION_MINUTES,
     DOMAIN,
     WATERING_FREQUENCY_INTERVAL,
     WATERING_MODE_FRACTIONED,
@@ -317,20 +313,25 @@ class TotalCumulativeNeedSensor(CoordinatorEntity[IrrigationCoordinator], Sensor
         if data is None:
             return {}
         total_cumulative = sum(data.cumulative_need.values())
-        flow_rate: float = self._entry.options.get(CONF_GLOBAL_FLOW_RATE, 0.0)
+        flow_rate = self.coordinator.flow_rate
         if flow_rate <= 0 or total_cumulative <= 0:
-            return {}
+            return {
+                ATTR_RECOMMENDED_DURATION_MINUTES: 0,
+                ATTR_IS_FRACTIONED: self.coordinator.watering_mode == WATERING_MODE_FRACTIONED,
+                ATTR_CYCLES_COUNT: self.coordinator.cycles_count,
+                ATTR_DURATION_PER_CYCLE_MINUTES: 0,
+                ATTR_SOAK_DURATION_MINUTES: self.coordinator.soak_duration_minutes,
+            }
         duration_minutes = round((total_cumulative / flow_rate) * 60, 1)
-        attrs: dict = {ATTR_RECOMMENDED_DURATION_MINUTES: duration_minutes}
-        watering_mode: str = self._entry.options.get(CONF_WATERING_MODE, "")
-        if watering_mode == WATERING_MODE_FRACTIONED:
-            attrs[ATTR_IS_FRACTIONED] = True
-            attrs[ATTR_CYCLES_COUNT] = DEFAULT_CYCLES_COUNT
-            attrs[ATTR_DURATION_PER_CYCLE_MINUTES] = round(
-                duration_minutes / DEFAULT_CYCLES_COUNT, 1
-            )
-            attrs[ATTR_SOAK_DURATION_MINUTES] = DEFAULT_SOAK_DURATION_MINUTES
-        return attrs
+        is_fractioned = self.coordinator.watering_mode == WATERING_MODE_FRACTIONED
+        cycles = self.coordinator.cycles_count
+        return {
+            ATTR_RECOMMENDED_DURATION_MINUTES: duration_minutes,
+            ATTR_IS_FRACTIONED: is_fractioned,
+            ATTR_CYCLES_COUNT: cycles,
+            ATTR_DURATION_PER_CYCLE_MINUTES: round(duration_minutes / cycles, 1) if cycles else 0,
+            ATTR_SOAK_DURATION_MINUTES: self.coordinator.soak_duration_minutes,
+        }
 
 
 class PrecipitationSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity):

@@ -23,38 +23,108 @@
         "title": "Gestisci il tuo orto",
         "menu_options": {
           "add_crop": "Aggiungi una coltura",
-          "remove_crop": "Rimuovi una coltura"
+          "remove_crop": "Rimuovi una coltura",
+          "valve_config": "Configura valvola globale",
+          "watering_config": "Frequenza e modalità di irrigazione",
+          "auto_irrigation": "Irrigazione automatica"
         }
       },
       "add_crop": {
         "title": "Aggiungi una coltura",
+        "description": "Dai un nome a questa area, seleziona la coltura, il suo stadio di crescita e il numero di piante. La densità FAO è pre-compilata — modificala se il tuo spaziatura differisce.",
         "data": {
           "crop_name": "Nome dell'area",
           "crop_type": "Coltura",
           "stage": "Stadio di crescita",
           "nb_plants": "Numero di piante",
           "density": "Densità di piantagione (piante/m²)"
+        },
+        "data_description": {
+          "density": "Densità FAO predefinita: {fao_densities}"
         }
       },
       "remove_crop": {
         "title": "Rimuovi una coltura",
+        "description": "{crops_count} coltura/e configurata/e. Seleziona quella da rimuovere.",
         "data": {
           "crop_id": "Coltura da rimuovere"
         }
+      },
+      "valve_config": {
+        "title": "Valvola globale dell'orto",
+        "description": "Seleziona l'entità valvola o interruttore che alimenta la tua rete di irrigazione e inserisci la portata totale dell'impianto.",
+        "data": {
+          "global_valve_entity_id": "Entità valvola / interruttore",
+          "global_flow_rate": "Portata dell'impianto (L/h)"
+        },
+        "data_description": {
+          "global_valve_entity_id": "Lascia vuoto se non vuoi il monitoraggio automatico delle irrigazioni.",
+          "global_flow_rate": "Portata oraria totale quando la valvola è aperta."
+        }
+      },
+      "watering_config": {
+        "title": "Frequenza e modalità di irrigazione",
+        "description": "Definisci con quale frequenza e come viene irrigato il tuo orto.",
+        "data": {
+          "watering_frequency": "Frequenza di irrigazione",
+          "watering_interval_days": "Intervallo tra le irrigazioni",
+          "watering_mode": "Modalità di irrigazione",
+          "cycles_count": "Numero di cicli (modalità frazionata)",
+          "soak_duration_minutes": "Tempo di pausa tra i cicli (min)"
+        },
+        "data_description": {
+          "watering_interval_days": "Usato solo se la frequenza è 'Intervallo fisso'.",
+          "watering_mode": "In modalità Frazionata, l'irrigazione è suddivisa in cicli per migliorare l'infiltrazione.",
+          "cycles_count": "Numero di cicli di irrigazione successivi. Solo in modalità Frazionata.",
+          "soak_duration_minutes": "Tempo di pausa tra ogni ciclo. Solo in modalità Frazionata."
+        }
+      },
+      "auto_irrigation": {
+        "title": "Irrigazione automatica",
+        "description": "Imposta l'ora in cui la centrale emetterà l'evento di irrigazione automatica. Usa il blueprint di automazione fornito per collegare questo evento alla tua valvola fisica.",
+        "data": {
+          "irrigation_time": "Ora di attivazione"
+        },
+        "data_description": {
+          "irrigation_time": "L'evento di irrigazione verrà emesso a quest'ora ogni giorno."
+        }
       }
+    },
+    "error": {
+      "invalid_crop_name": "Il nome dell'area non può essere vuoto."
     },
     "abort": {
       "no_crops": "Nessuna coltura configurata. Aggiungi prima una coltura."
     }
   },
   "entity": {
+    "sensor": {
+      "irrigation": { "name": "Irrigazione" },
+      "cumulative_need": { "name": "Fabbisogno cumulato" },
+      "kc": { "name": "Kc" },
+      "eto": { "name": "ETo" },
+      "total_daily": { "name": "Fabbisogno giornaliero" },
+      "total_cumulative": { "name": "Fabbisogno cumulato" },
+      "precipitation_daily": { "name": "Precipitazioni giornaliere" },
+      "next_watering": { "name": "Prossima irrigazione" }
+    },
+    "button": {
+      "reset_irrigation": { "name": "Reimposta irrigazione" },
+      "start_irrigation_now": { "name": "Avvia irrigazione ora" }
+    },
+    "switch": {
+      "auto_irrigation": { "name": "Irrigazione automatica" }
+    },
+    "time": {
+      "irrigation_time": { "name": "Ora di irrigazione" }
+    },
     "number": {
-      "nb_plants": {
-        "name": "Numero di piante"
-      },
-      "density": {
-        "name": "Densità (piante/m²)"
-      }
+      "nb_plants": { "name": "Numero di piante" },
+      "density": { "name": "Densità (piante/m²)" },
+      "global_flow_rate": { "name": "Portata dell'impianto" },
+      "watering_interval_days": { "name": "Intervallo tra le irrigazioni" },
+      "cycles_count": { "name": "Numero di cicli" },
+      "soak_duration": { "name": "Pausa tra i cicli" }
     },
     "select": {
       "stage": {
@@ -63,6 +133,20 @@
           "ini": "Iniziale (germinazione / attecchimento)",
           "mid": "Mezza stagione (pieno sviluppo)",
           "end": "Fine stagione (maturazione)"
+        }
+      },
+      "watering_frequency": {
+        "name": "Frequenza di irrigazione",
+        "state": {
+          "daily": "Giornaliero",
+          "interval": "Intervallo fisso di X giorni"
+        }
+      },
+      "watering_mode": {
+        "name": "Modalità di irrigazione",
+        "state": {
+          "continuous": "Continuo",
+          "fractioned": "Frazionato / Ciclo e infiltrazione"
         }
       }
     }
@@ -104,6 +188,18 @@
         "ini": "Iniziale (germinazione / attecchimento)",
         "mid": "Mezza stagione (pieno sviluppo)",
         "end": "Fine stagione (maturazione)"
+      }
+    },
+    "watering_frequency": {
+      "options": {
+        "daily": "Giornaliero",
+        "interval": "Intervallo fisso di X giorni"
+      }
+    },
+    "watering_mode": {
+      "options": {
+        "continuous": "Continuo",
+        "fractioned": "Frazionato / Ciclo e infiltrazione"
       }
     }
   }

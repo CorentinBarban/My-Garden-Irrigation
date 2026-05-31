@@ -1,22 +1,28 @@
-"""Plateforme number — My Garden Irrigation."""
-from __future__ import annotations
+"""Plateforme number — My Garden Irrigation.
 
-import copy
+Toutes les entités héritent de RestoreEntity pour persister leur valeur
+sans écrire dans ConfigEntry.options (Module 1 du CDC de refactoring).
+"""
+from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_CROP_ID,
     CONF_CROPS,
+    CONF_CYCLES_COUNT,
     CONF_DENSITY,
     CONF_GLOBAL_FLOW_RATE,
     CONF_NB_PLANTS,
+    CONF_SOAK_DURATION,
     CONF_WATERING_INTERVAL_DAYS,
+    DEFAULT_CYCLES_COUNT,
+    DEFAULT_SOAK_DURATION_MINUTES,
     DOMAIN,
-    OPTIONS_FIELD_UPDATE_FLAG,
 )
 from .coordinator import IrrigationCoordinator
 from .sensor import _centrale_device_info, _plant_device_info
@@ -28,48 +34,21 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Crée les contrôles numériques par culture et les contrôles globaux."""
-    entities: list = [GlobalFlowRateNumber(hass, entry), WateringIntervalDaysNumber(hass, entry)]
+    coordinator: IrrigationCoordinator = hass.data[DOMAIN][entry.entry_id]
+    entities: list = [
+        GlobalFlowRateNumber(coordinator, entry),
+        WateringIntervalDaysNumber(coordinator, entry),
+        CyclesCountNumber(coordinator, entry),
+        SoakDurationNumber(coordinator, entry),
+    ]
     for crop in entry.options.get(CONF_CROPS, []):
-        entities.append(NbPlantsNumber(hass, entry, crop))
-        entities.append(DensityNumber(hass, entry, crop))
+        entities.append(NbPlantsNumber(coordinator, entry, crop))
+        entities.append(DensityNumber(coordinator, entry, crop))
     async_add_entities(entities)
 
 
-def _update_crop_field(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    crop_id: str,
-    field: str,
-    value: object,
-) -> None:
-    """Met à jour un champ d'une culture dans les options sans rechargement complet."""
-    crops = copy.deepcopy(entry.options.get(CONF_CROPS, []))
-    for crop in crops:
-        if crop[CONF_CROP_ID] == crop_id:
-            crop[field] = value
-            break
-    hass.data[DOMAIN].setdefault(OPTIONS_FIELD_UPDATE_FLAG, set()).add(entry.entry_id)
-    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_CROPS: crops})
-
-
-def _update_global_option(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    field: str,
-    value: object,
-) -> None:
-    """Met à jour une option globale sans rechargement complet."""
-    hass.data[DOMAIN].setdefault(OPTIONS_FIELD_UPDATE_FLAG, set()).add(entry.entry_id)
-    hass.config_entries.async_update_entry(entry, options={**entry.options, field: value})
-
-
-async def _refresh(hass: HomeAssistant, entry_id: str) -> None:
-    coordinator: IrrigationCoordinator = hass.data[DOMAIN][entry_id]
-    await coordinator.async_request_refresh()
-
-
-class NbPlantsNumber(NumberEntity):
-    """Contrôle le nombre de plants d'une culture."""
+class NbPlantsNumber(NumberEntity, RestoreEntity):
+    """Contrôle le nombre de plants d'une culture — valeur persistée via RestoreEntity."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "nb_plants"
@@ -79,26 +58,41 @@ class NbPlantsNumber(NumberEntity):
     _attr_native_step = 1
     _attr_mode = NumberMode.BOX
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, crop: dict) -> None:
-        self._hass = hass
-        self._entry = entry
+    def __init__(
+        self,
+        coordinator: IrrigationCoordinator,
+        entry: ConfigEntry,
+        crop: dict,
+    ) -> None:
+        self._coordinator = coordinator
         self._crop_id: str = crop[CONF_CROP_ID]
+        self._value: float = float(crop[CONF_NB_PLANTS])
         self._attr_unique_id = f"{entry.entry_id}_{self._crop_id}_nb_plants"
         self._attr_device_info = _plant_device_info(entry, crop)
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in ("unknown", "unavailable"):
+            try:
+                self._value = float(last.state)
+            except ValueError:
+                pass
+        self._coordinator.update_crop_field(self._crop_id, CONF_NB_PLANTS, int(self._value))
+        await self._coordinator.async_request_refresh()
+
     @property
     def native_value(self) -> float:
-        for crop in self._entry.options.get(CONF_CROPS, []):
-            if crop[CONF_CROP_ID] == self._crop_id:
-                return float(crop[CONF_NB_PLANTS])
-        return 1.0
+        return self._value
 
     async def async_set_native_value(self, value: float) -> None:
-        _update_crop_field(self._hass, self._entry, self._crop_id, CONF_NB_PLANTS, int(value))
-        await _refresh(self._hass, self._entry.entry_id)
+        self._value = value
+        self._coordinator.update_crop_field(self._crop_id, CONF_NB_PLANTS, int(value))
+        self.async_write_ha_state()
+        await self._coordinator.async_request_refresh()
 
 
-class DensityNumber(NumberEntity):
+class DensityNumber(NumberEntity, RestoreEntity):
     """Contrôle la densité de plantation d'une culture (plants/m²)."""
 
     _attr_has_entity_name = True
@@ -109,26 +103,41 @@ class DensityNumber(NumberEntity):
     _attr_native_step = 0.1
     _attr_mode = NumberMode.BOX
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, crop: dict) -> None:
-        self._hass = hass
-        self._entry = entry
+    def __init__(
+        self,
+        coordinator: IrrigationCoordinator,
+        entry: ConfigEntry,
+        crop: dict,
+    ) -> None:
+        self._coordinator = coordinator
         self._crop_id: str = crop[CONF_CROP_ID]
+        self._value: float = float(crop[CONF_DENSITY])
         self._attr_unique_id = f"{entry.entry_id}_{self._crop_id}_density"
         self._attr_device_info = _plant_device_info(entry, crop)
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in ("unknown", "unavailable"):
+            try:
+                self._value = float(last.state)
+            except ValueError:
+                pass
+        self._coordinator.update_crop_field(self._crop_id, CONF_DENSITY, round(self._value, 1))
+        await self._coordinator.async_request_refresh()
+
     @property
     def native_value(self) -> float:
-        for crop in self._entry.options.get(CONF_CROPS, []):
-            if crop[CONF_CROP_ID] == self._crop_id:
-                return float(crop[CONF_DENSITY])
-        return 1.0
+        return self._value
 
     async def async_set_native_value(self, value: float) -> None:
-        _update_crop_field(self._hass, self._entry, self._crop_id, CONF_DENSITY, round(value, 1))
-        await _refresh(self._hass, self._entry.entry_id)
+        self._value = round(value, 1)
+        self._coordinator.update_crop_field(self._crop_id, CONF_DENSITY, self._value)
+        self.async_write_ha_state()
+        await self._coordinator.async_request_refresh()
 
 
-class GlobalFlowRateNumber(NumberEntity):
+class GlobalFlowRateNumber(NumberEntity, RestoreEntity):
     """Contrôle le débit total de l'installation d'arrosage (L/h) — centrale."""
 
     _attr_has_entity_name = True
@@ -140,23 +149,34 @@ class GlobalFlowRateNumber(NumberEntity):
     _attr_native_unit_of_measurement = "L/h"
     _attr_mode = NumberMode.BOX
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        self._hass = hass
-        self._entry = entry
+    def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._value: float = float(entry.options.get(CONF_GLOBAL_FLOW_RATE, 0.0))
         self._attr_unique_id = f"{entry.entry_id}_global_flow_rate"
         self._attr_device_info = _centrale_device_info(entry)
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in ("unknown", "unavailable"):
+            try:
+                self._value = float(last.state)
+            except ValueError:
+                pass
+        self._coordinator.set_flow_rate(self._value)
+
     @property
     def native_value(self) -> float:
-        return float(self._entry.options.get(CONF_GLOBAL_FLOW_RATE, 0.0))
+        return self._value
 
     async def async_set_native_value(self, value: float) -> None:
-        _update_global_option(self._hass, self._entry, CONF_GLOBAL_FLOW_RATE, round(value, 1))
-        await _refresh(self._hass, self._entry.entry_id)
+        self._value = round(value, 1)
+        self._coordinator.set_flow_rate(self._value)
+        self.async_write_ha_state()
 
 
-class WateringIntervalDaysNumber(NumberEntity):
-    """Contrôle l'intervalle en jours entre deux arrosages (utilisé si fréquence = intervalle fixe)."""
+class WateringIntervalDaysNumber(NumberEntity, RestoreEntity):
+    """Intervalle en jours entre deux arrosages (utilisé si fréquence = intervalle fixe)."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "watering_interval_days"
@@ -166,16 +186,106 @@ class WateringIntervalDaysNumber(NumberEntity):
     _attr_native_step = 1
     _attr_mode = NumberMode.BOX
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        self._hass = hass
-        self._entry = entry
+    def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._value: float = float(entry.options.get(CONF_WATERING_INTERVAL_DAYS, 2))
         self._attr_unique_id = f"{entry.entry_id}_watering_interval_days"
         self._attr_device_info = _centrale_device_info(entry)
 
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in ("unknown", "unavailable"):
+            try:
+                self._value = float(last.state)
+            except ValueError:
+                pass
+        self._coordinator.set_watering_interval_days(int(self._value))
+
     @property
     def native_value(self) -> float:
-        return float(self._entry.options.get(CONF_WATERING_INTERVAL_DAYS, 2))
+        return self._value
 
     async def async_set_native_value(self, value: float) -> None:
-        _update_global_option(self._hass, self._entry, CONF_WATERING_INTERVAL_DAYS, int(value))
-        await _refresh(self._hass, self._entry.entry_id)
+        self._value = float(int(value))
+        self._coordinator.set_watering_interval_days(int(value))
+        self.async_write_ha_state()
+
+
+class CyclesCountNumber(NumberEntity, RestoreEntity):
+    """Nombre de cycles pour le mode d'arrosage fractionné (Cycle & Soak)."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "cycles_count"
+    _attr_icon = "mdi:repeat"
+    _attr_native_min_value = 1
+    _attr_native_max_value = 10
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._value: float = float(
+            entry.options.get(CONF_CYCLES_COUNT, DEFAULT_CYCLES_COUNT)
+        )
+        self._attr_unique_id = f"{entry.entry_id}_cycles_count"
+        self._attr_device_info = _centrale_device_info(entry)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in ("unknown", "unavailable"):
+            try:
+                self._value = float(last.state)
+            except ValueError:
+                pass
+        self._coordinator.set_cycles_count(int(self._value))
+
+    @property
+    def native_value(self) -> float:
+        return self._value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._value = float(int(value))
+        self._coordinator.set_cycles_count(int(value))
+        self.async_write_ha_state()
+
+
+class SoakDurationNumber(NumberEntity, RestoreEntity):
+    """Durée de repos (minutes) entre chaque cycle du mode fractionné."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "soak_duration"
+    _attr_icon = "mdi:timer-sand"
+    _attr_native_min_value = 1
+    _attr_native_max_value = 120
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "min"
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: IrrigationCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._value: float = float(
+            entry.options.get(CONF_SOAK_DURATION, DEFAULT_SOAK_DURATION_MINUTES)
+        )
+        self._attr_unique_id = f"{entry.entry_id}_soak_duration"
+        self._attr_device_info = _centrale_device_info(entry)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in ("unknown", "unavailable"):
+            try:
+                self._value = float(last.state)
+            except ValueError:
+                pass
+        self._coordinator.set_soak_duration_minutes(int(self._value))
+
+    @property
+    def native_value(self) -> float:
+        return self._value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._value = float(int(value))
+        self._coordinator.set_soak_duration_minutes(int(value))
+        self.async_write_ha_state()

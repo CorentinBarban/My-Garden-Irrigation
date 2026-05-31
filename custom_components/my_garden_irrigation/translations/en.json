@@ -23,7 +23,10 @@
         "title": "Manage your garden",
         "menu_options": {
           "add_crop": "Add a crop",
-          "remove_crop": "Remove a crop"
+          "remove_crop": "Remove a crop",
+          "valve_config": "Configure global valve",
+          "watering_config": "Watering frequency and mode",
+          "auto_irrigation": "Automatic irrigation"
         }
       },
       "add_crop": {
@@ -42,23 +45,86 @@
       },
       "remove_crop": {
         "title": "Remove a crop",
+        "description": "{crops_count} crop(s) configured. Select the one to remove.",
         "data": {
           "crop_id": "Crop to remove"
         }
+      },
+      "valve_config": {
+        "title": "Global garden valve",
+        "description": "Select the valve or switch entity that feeds your irrigation network, and enter the total flow rate of your installation.",
+        "data": {
+          "global_valve_entity_id": "Valve / switch entity",
+          "global_flow_rate": "Installation flow rate (L/h)"
+        },
+        "data_description": {
+          "global_valve_entity_id": "Leave empty if you do not want automatic watering tracking.",
+          "global_flow_rate": "Total hourly flow rate when the valve is open."
+        }
+      },
+      "watering_config": {
+        "title": "Watering frequency and mode",
+        "description": "Define how often your garden is watered and how water is distributed.",
+        "data": {
+          "watering_frequency": "Watering frequency",
+          "watering_interval_days": "Interval between waterings",
+          "watering_mode": "Watering mode",
+          "cycles_count": "Number of cycles (fractioned mode)",
+          "soak_duration_minutes": "Soak time between cycles (min)"
+        },
+        "data_description": {
+          "watering_interval_days": "Used only when frequency is set to Fixed interval.",
+          "watering_mode": "In Fractioned mode, the watering dose is split into cycles to improve soil infiltration.",
+          "cycles_count": "Number of successive watering cycles. Only used in Fractioned mode.",
+          "soak_duration_minutes": "Rest time between each cycle. Only used in Fractioned mode."
+        }
+      },
+      "auto_irrigation": {
+        "title": "Automatic irrigation",
+        "description": "Set the time at which the hub will emit the automatic irrigation event. Use the provided automation blueprint to link this event to your physical valve. Then enable the 'Automatic irrigation' switch on the hub.",
+        "data": {
+          "irrigation_time": "Trigger time"
+        },
+        "data_description": {
+          "irrigation_time": "The irrigation event will be emitted at this time each day (or according to the configured interval)."
+        }
       }
+    },
+    "error": {
+      "invalid_crop_name": "Plot name cannot be empty."
     },
     "abort": {
       "no_crops": "No crops configured. Add a crop first."
     }
   },
   "entity": {
+    "sensor": {
+      "irrigation": { "name": "Irrigation" },
+      "cumulative_need": { "name": "Cumulative need" },
+      "kc": { "name": "Kc" },
+      "eto": { "name": "ETo" },
+      "total_daily": { "name": "Daily need" },
+      "total_cumulative": { "name": "Cumulative need" },
+      "precipitation_daily": { "name": "Daily precipitation" },
+      "next_watering": { "name": "Next watering" }
+    },
+    "button": {
+      "reset_irrigation": { "name": "Reset irrigation" },
+      "start_irrigation_now": { "name": "Start irrigation now" }
+    },
+    "switch": {
+      "auto_irrigation": { "name": "Automatic irrigation" }
+    },
+    "time": {
+      "irrigation_time": { "name": "Irrigation time" }
+    },
     "number": {
-      "nb_plants": {
-        "name": "Number of plants"
-      },
-      "density": {
-        "name": "Density (plants/m²)"
-      }
+      "nb_plants": { "name": "Number of plants" },
+      "density": { "name": "Density (plants/m²)" },
+      "global_flow_rate": { "name": "Installation flow rate" },
+      "watering_interval_days": { "name": "Interval between waterings" },
+      "cycles_count": { "name": "Number of cycles" },
+      "soak_duration": { "name": "Soak between cycles" }
     },
     "select": {
       "stage": {
@@ -67,6 +133,20 @@
           "ini": "Initial (seedling / establishment)",
           "mid": "Mid-season (full development)",
           "end": "Late season (ripening)"
+        }
+      },
+      "watering_frequency": {
+        "name": "Watering frequency",
+        "state": {
+          "daily": "Daily",
+          "interval": "Fixed interval of X days"
+        }
+      },
+      "watering_mode": {
+        "name": "Watering mode",
+        "state": {
+          "continuous": "Continuous",
+          "fractioned": "Fractioned / Cycle & Soak"
         }
       }
     }
@@ -108,6 +188,18 @@
         "ini": "Initial (seedling / establishment)",
         "mid": "Mid-season (full development)",
         "end": "Late season (ripening)"
+      }
+    },
+    "watering_frequency": {
+      "options": {
+        "daily": "Daily",
+        "interval": "Fixed interval of X days"
+      }
+    },
+    "watering_mode": {
+      "options": {
+        "continuous": "Continuous",
+        "fractioned": "Fractioned / Cycle & Soak"
       }
     }
   }

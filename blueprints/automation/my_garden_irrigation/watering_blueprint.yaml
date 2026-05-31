@@ -1,0 +1,108 @@
+blueprint:
+  name: "My Garden Irrigation — Arrosage automatique sécurisé"
+  description: >
+    Lie l'événement `my_garden_irrigation_irrigation_requested` émis par
+    la centrale My Garden Irrigation à votre vanne physique.
+
+    Ce blueprint garantit la sécurité d'extinction de la vanne via le moteur
+    natif Home Assistant : si HA redémarre en cours d'arrosage, la vanne est
+    coupée automatiquement à la reprise.
+
+    **Pré-requis :**
+    - L'intégration My Garden Irrigation est configurée avec une vanne globale.
+    - Le switch « Arrosage automatique » est activé sur la centrale.
+    - Ce blueprint est associé à l'entité vanne de votre installation.
+
+  domain: automation
+  input:
+    valve_entity:
+      name: Entité vanne physique
+      description: >
+        Sélectionnez la vanne ou l'interrupteur à piloter pour l'arrosage.
+        Doit correspondre à l'entité configurée dans l'intégration.
+      selector:
+        entity:
+          domain:
+            - valve
+            - switch
+    entry_id_filter:
+      name: Identifiant de l'intégration (optionnel)
+      description: >
+        Si vous avez plusieurs potagers configurés, filtrez sur l'entry_id
+        d'une instance spécifique. Laissez vide pour réagir à tous les potagers.
+      default: ""
+      selector:
+        text:
+
+variables:
+  valve_entity: !input valve_entity
+  entry_id_filter: !input entry_id_filter
+
+trigger:
+  - platform: event
+    event_type: my_garden_irrigation_irrigation_requested
+    id: start_irrigation
+
+condition:
+  - condition: template
+    value_template: >
+      {{ entry_id_filter == "" or
+         trigger.event.data.entry_id == entry_id_filter }}
+
+action:
+  - variables:
+      duration_min: "{{ trigger.event.data.recommended_duration_minutes | float(0) }}"
+      is_fractioned: "{{ trigger.event.data.is_fractioned | default(false) }}"
+      cycles: "{{ trigger.event.data.cycles_count | default(1) | int }}"
+      cycle_min: "{{ trigger.event.data.duration_per_cycle_minutes | default(duration_min) | float }}"
+      soak_min: "{{ trigger.event.data.soak_duration_minutes | default(15) | int }}"
+
+  - choose:
+      # Mode fractionné (Cycle & Soak)
+      - conditions:
+          - condition: template
+            value_template: "{{ is_fractioned and cycles > 1 and duration_min > 0 }}"
+        sequence:
+          - repeat:
+              count: "{{ cycles }}"
+              sequence:
+                - service: homeassistant.turn_on
+                  target:
+                    entity_id: !input valve_entity
+                - delay:
+                    minutes: "{{ cycle_min }}"
+                - service: homeassistant.turn_off
+                  target:
+                    entity_id: !input valve_entity
+                - if:
+                    - condition: template
+                      value_template: "{{ repeat.index < cycles }}"
+                  then:
+                    - delay:
+                        minutes: "{{ soak_min }}"
+
+      # Mode continu
+    default:
+      - condition: template
+        value_template: "{{ duration_min > 0 }}"
+      - service: homeassistant.turn_on
+        target:
+          entity_id: !input valve_entity
+      - delay:
+          minutes: "{{ duration_min }}"
+      - service: homeassistant.turn_off
+        target:
+          entity_id: !input valve_entity
+
+  - if:
+      - condition: template
+        value_template: "{{ duration_min <= 0 }}"
+    then:
+      - service: system_log.write
+        data:
+          message: >
+            My Garden Irrigation : durée recommandée = 0 min, arrosage ignoré.
+          level: info
+
+mode: single
+max_exceeded: silent
