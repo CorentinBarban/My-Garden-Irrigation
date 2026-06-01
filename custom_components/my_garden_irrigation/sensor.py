@@ -1,7 +1,7 @@
 """Plateforme sensor — My Garden Irrigation."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
@@ -41,7 +41,6 @@ from .const import (
     CONF_CROPS,
     CONF_NAME,
     DOMAIN,
-    WATERING_FREQUENCY_INTERVAL,
     WATERING_MODE_FRACTIONED,
 )
 
@@ -387,39 +386,6 @@ class NextWateringSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity)
 
     @property
     def native_value(self) -> datetime | None:
-        time_str = self.coordinator.config.irrigation_time
-        try:
-            parts = time_str.split(":")
-            hour, minute = int(parts[0]), int(parts[1])
-        except (ValueError, AttributeError, IndexError):
-            return None
-
-        frequency = self.coordinator.config.watering_frequency
-        now = dt_util.now()
-
-        if frequency == WATERING_FREQUENCY_INTERVAL:
-            interval_days = self.coordinator.config.watering_interval_days
-            last_date_str = self.coordinator.config.last_auto_watering_date
-            if last_date_str:
-                from datetime import date as _date
-                last = _date.fromisoformat(last_date_str)
-                next_date = last + timedelta(days=interval_days)
-                return now.replace(
-                    year=next_date.year,
-                    month=next_date.month,
-                    day=next_date.day,
-                    hour=hour,
-                    minute=minute,
-                    second=0,
-                    microsecond=0,
-                )
-            base = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if base > now:
-                return base
-            return base + timedelta(days=interval_days)
-
-        # Mode quotidien
-        next_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if next_dt <= now:
-            next_dt += timedelta(days=1)
-        return next_dt
+        if self.coordinator._scheduler is not None:
+            return self.coordinator._scheduler.next_trigger
+        return None

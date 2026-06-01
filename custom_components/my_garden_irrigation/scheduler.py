@@ -43,6 +43,7 @@ class IrrigationScheduler:
         self._on_trigger = on_trigger
         self._midnight_unsub: Callable | None = None
         self._auto_unsub: Callable | None = None
+        self.next_trigger: datetime | None = None
 
     def setup(self) -> Callable:
         """Initialise les listeners et retourne le callback de nettoyage."""
@@ -79,6 +80,7 @@ class IrrigationScheduler:
         if next_trigger <= now:
             next_trigger += timedelta(days=1)
 
+        self.next_trigger = next_trigger
         self._auto_unsub = async_track_point_in_time(
             self._hass, self._handle_auto_irrigation, next_trigger
         )

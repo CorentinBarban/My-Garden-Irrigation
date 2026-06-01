@@ -66,7 +66,7 @@ def compute_crop_result(
     etc_liters = compute_etc_liters(kc, eto_mm, surface_m2)
     effective_rainfall_mm = compute_effective_rainfall_mm(precipitation_mm)
     net_liters = compute_net_liters(etc_liters, effective_rainfall_mm, surface_m2)
-    daily_need_liters = max(0.0, net_liters - watering_applied_today_liters)
+    daily_need_liters = net_liters
     return CropResult(
         liters=round(net_liters, 1),
         etc_liters=round(etc_liters, 1),

@@ -152,6 +152,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     async def _on_trigger(self, date_iso: str) -> None:
         if self.fire_irrigation_event():
             await self.update_last_watering_date(date_iso)
+        else:
+            _LOGGER.info("Calendrier préservé — Nouvelle tentative planifiée pour demain.")
 
     # ------------------------------------------------------------------
     # API publique — appelée par les entités HA

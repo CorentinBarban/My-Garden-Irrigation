@@ -247,10 +247,10 @@ class RuntimeConfigState:
                 return
 
     def set_flow_rate(self, value: float) -> None:
-        self._flow_rate = value
+        self._flow_rate = max(0.0, float(value))
 
     def set_watering_interval_days(self, value: int) -> None:
-        self._watering_interval_days = value
+        self._watering_interval_days = max(1, int(value))
 
     def set_watering_frequency(self, value: str) -> None:
         self._watering_frequency = value
@@ -262,10 +262,10 @@ class RuntimeConfigState:
         self._irrigation_time = value
 
     def set_cycles_count(self, value: int) -> None:
-        self._cycles_count = value
+        self._cycles_count = max(1, int(value))
 
     def set_soak_duration_minutes(self, value: int) -> None:
-        self._soak_duration_minutes = value
+        self._soak_duration_minutes = max(0, int(value))
 
     def set_valve_open_time(self, time: datetime | None) -> None:
         self._valve_open_time = time

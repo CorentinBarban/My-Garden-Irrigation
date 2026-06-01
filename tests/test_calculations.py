@@ -112,29 +112,39 @@ def test_crop_result_with_rain():
     assert result.liters == pytest.approx(0.0)
     assert result.effective_rainfall_mm == pytest.approx(16.0)
 
-def test_crop_result_watering_applied_reduces_daily_need():
-    result_no_watering = compute_crop_result(
+def test_crop_result_watering_applied_tracked_but_does_not_reduce_daily_need():
+    """ADR-019 : daily_need_liters = net_liters indépendamment du volume arrosé.
+
+    L'arrosage appliqué est tracé dans CropResult pour l'affichage mais
+    ne modifie plus le besoin journalier — la déduction est portée par le
+    bilan cumulé via apply_watering_volumes (RuntimeConfigState).
+    """
+    base = compute_crop_result(
         nb_plants=10, density=2.0, kc=0.7, eto_mm=4.0,
         precipitation_mm=0.0, crop_type="tomate", stage="mid",
         watering_applied_today_liters=0.0,
     )
-    # On arrose la moitié du besoin
-    half = result_no_watering.liters / 2
+    half = base.liters / 2
     result_half = compute_crop_result(
         nb_plants=10, density=2.0, kc=0.7, eto_mm=4.0,
         precipitation_mm=0.0, crop_type="tomate", stage="mid",
         watering_applied_today_liters=half,
     )
-    assert result_half.daily_need_liters == pytest.approx(half, abs=0.2)
+    # daily_need_liters doit rester égal au besoin net — pas réduit par l'arrosage
+    assert result_half.daily_need_liters == pytest.approx(base.liters, abs=0.2)
+    # le volume arrosé est bien conservé dans CropResult pour l'affichage
     assert result_half.watering_applied_today_liters == pytest.approx(half, abs=0.2)
 
-def test_crop_result_full_watering_zeroes_daily_need():
+def test_crop_result_daily_need_equals_net_liters_regardless_of_watering():
+    """ADR-019 : même un arrosage massif ne réduit pas daily_need_liters."""
     result = compute_crop_result(
         nb_plants=10, density=2.0, kc=0.7, eto_mm=4.0,
         precipitation_mm=0.0, crop_type="tomate", stage="mid",
-        watering_applied_today_liters=1000.0,  # bien au-dessus du besoin
+        watering_applied_today_liters=1000.0,
     )
-    assert result.daily_need_liters == pytest.approx(0.0)
+    # daily_need_liters == net_liters, pas 0
+    assert result.daily_need_liters == pytest.approx(result.liters, abs=0.2)
+    assert result.daily_need_liters > 0
 
 def test_crop_result_weekly_projection():
     result = compute_crop_result(
@@ -212,14 +222,23 @@ def test_irrigation_data_cumulative_need_passthrough():
     )
     assert data.cumulative_need == cumulative
 
-def test_irrigation_data_watering_reduces_daily_need():
+def test_irrigation_data_watering_tracked_but_does_not_reduce_daily_need():
+    """ADR-019 : total_daily_need_liters = net_liters — non affecté par watering_applied_today.
+
+    La déduction est portée par le bilan cumulé (apply_watering_volumes),
+    pas par le calcul agronomique pur.
+    """
     data_no_water = compute_irrigation_data(
         crops=_CROPS[:1], kc_data=_KC_DATA, eto_mm=4.0, kc_getter=_kc_getter,
     )
-    big_watering = {"c1": 1000.0}
     data_watered = compute_irrigation_data(
         crops=_CROPS[:1], kc_data=_KC_DATA, eto_mm=4.0, kc_getter=_kc_getter,
-        watering_applied_today=big_watering,
+        watering_applied_today={"c1": 1000.0},
     )
+    # Le besoin journalier ne dépend pas du volume déjà arrosé
     assert data_no_water.total_daily_need_liters > 0
-    assert data_watered.total_daily_need_liters == pytest.approx(0.0)
+    assert data_watered.total_daily_need_liters == pytest.approx(
+        data_no_water.total_daily_need_liters, abs=0.2
+    )
+    # Le volume arrosé est bien tracé dans CropResult
+    assert data_watered.crops["c1"].watering_applied_today_liters == pytest.approx(1000.0)
