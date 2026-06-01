@@ -196,16 +196,32 @@ def test_apply_watering_volumes_accumulates():
     state.apply_watering_volumes({"c1": 3.0})
     assert state.watering_applied_today["c1"] == pytest.approx(8.0)
 
-def test_apply_watering_volumes_resets_cumulative():
-    state = _make_state()
-    state._cumulative_need = {"c1": 10.0, "c2": 5.0}
-    # On a 1 crop dans les options pour que _get_crop_ids() retourne c1
+def test_apply_watering_volumes_partial_reduces_deficit():
+    """Arrosage partiel : le déficit résiduel (déficit − volume) est conservé."""
     crops = [_crop("c1")]
-    state2 = RuntimeConfigState(_options(**{CONF_CROPS: crops}))
-    state2._cumulative_need = {"c1": 10.0}
-    state2.apply_watering_volumes({"c1": 3.0})
-    assert state2.cumulative_need["c1"] == pytest.approx(0.0)
-    assert state2.watering_applied_today["c1"] == pytest.approx(3.0)
+    state = RuntimeConfigState(_options(**{CONF_CROPS: crops}))
+    state._cumulative_need = {"c1": 10.0}
+    state.apply_watering_volumes({"c1": 3.0})
+    assert state.cumulative_need["c1"] == pytest.approx(7.0)
+    assert state.watering_applied_today["c1"] == pytest.approx(3.0)
+
+def test_apply_watering_volumes_exceeds_deficit_clamps_to_zero():
+    """Volume distribué ≥ déficit : le cumulé est ramené à 0, pas en négatif."""
+    crops = [_crop("c1")]
+    state = RuntimeConfigState(_options(**{CONF_CROPS: crops}))
+    state._cumulative_need = {"c1": 2.0}
+    state.apply_watering_volumes({"c1": 50.0})
+    assert state.cumulative_need["c1"] == pytest.approx(0.0)
+
+def test_apply_watering_volumes_unwatered_crop_unchanged():
+    """La culture non arrosée (absente du dict volumes) conserve son déficit intégralement."""
+    crops = [_crop("c1"), _crop("c2")]
+    state = RuntimeConfigState(_options(**{CONF_CROPS: crops}))
+    state._cumulative_need = {"c1": 10.0, "c2": 8.0}
+    # Seule c1 reçoit de l'eau
+    state.apply_watering_volumes({"c1": 5.0})
+    assert state.cumulative_need["c1"] == pytest.approx(5.0)
+    assert state.cumulative_need["c2"] == pytest.approx(8.0)
 
 def test_apply_watering_volumes_empty():
     state = _make_state()
@@ -256,6 +272,37 @@ def test_init_cumulative_need():
     state = _make_state()
     state.init_cumulative_need({"c1": 12.0, "c2": 8.0})
     assert state.cumulative_need == {"c1": pytest.approx(12.0), "c2": pytest.approx(8.0)}
+
+
+# ---------------------------------------------------------------------------
+# init_missing_crops
+# ---------------------------------------------------------------------------
+
+def test_init_missing_crops_empty_state():
+    """Premier démarrage : toutes les cultures sont absentes → toutes initialisées."""
+    state = _make_state()
+    added = state.init_missing_crops({"c1": 12.0, "c2": 8.0})
+    assert added is True
+    assert state.cumulative_need == {"c1": pytest.approx(12.0), "c2": pytest.approx(8.0)}
+
+
+def test_init_missing_crops_new_crop_added():
+    """Nouvelle culture ajoutée à un système existant → seule la nouvelle est initialisée."""
+    state = _make_state()
+    state._cumulative_need = {"c1": 5.0}
+    added = state.init_missing_crops({"c1": 12.0, "c2": 8.0})
+    assert added is True
+    assert state.cumulative_need["c1"] == pytest.approx(5.0)  # existante inchangée
+    assert state.cumulative_need["c2"] == pytest.approx(8.0)  # nouvelle initialisée
+
+
+def test_init_missing_crops_all_present():
+    """Toutes les cultures déjà présentes → aucune modification, retourne False."""
+    state = _make_state()
+    state._cumulative_need = {"c1": 5.0, "c2": 3.0}
+    added = state.init_missing_crops({"c1": 12.0, "c2": 8.0})
+    assert added is False
+    assert state.cumulative_need == {"c1": pytest.approx(5.0), "c2": pytest.approx(3.0)}
 
 
 # ---------------------------------------------------------------------------
@@ -336,3 +383,33 @@ def test_storage_restore_empty_noop():
     state = _make_state()
     state.restore_from_storage({}, "2026-05-31")
     assert state.flow_rate == pytest.approx(300.0)  # valeur par défaut des options
+
+
+# ---------------------------------------------------------------------------
+# begin_irrigation_session / consume_session_close (Mode Cycle & Soak)
+# ---------------------------------------------------------------------------
+
+def test_begin_irrigation_session_three_cycles():
+    """3 cycles : les 2 premières fermetures ne sont pas finales, la 3e l'est."""
+    state = _make_state()
+    state.begin_irrigation_session(3)
+    assert state.consume_session_close() is False
+    assert state.consume_session_close() is False
+    assert state.consume_session_close() is True
+
+def test_begin_irrigation_session_single_cycle():
+    """1 cycle (mode continu) : la première fermeture est finale."""
+    state = _make_state()
+    state.begin_irrigation_session(1)
+    assert state.consume_session_close() is True
+
+def test_begin_irrigation_session_clamps_zero_to_one():
+    """cycles=0 est normalisé à 1 — la fermeture est immédiatement finale."""
+    state = _make_state()
+    state.begin_irrigation_session(0)
+    assert state.consume_session_close() is True
+
+def test_consume_session_close_without_active_session_returns_true():
+    """Sans session active (compteur à 0), toute fermeture est traitée comme finale."""
+    state = _make_state()
+    assert state.consume_session_close() is True

@@ -11,3 +11,5 @@ venv/
 *.db-shm
 *.db-wal
 .devcontainer/config/
+graphify-out/
+.claude

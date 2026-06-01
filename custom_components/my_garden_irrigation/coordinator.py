@@ -11,9 +11,12 @@ ADR-009 : vanne globale — géré par ValveTracker.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any
+
+import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -42,6 +45,7 @@ from .persistence import PersistenceManager
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(hours=1)
+WEATHER_RETRY_INTERVAL = timedelta(minutes=15)
 
 
 class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
@@ -60,7 +64,9 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self._kc_data: dict = {}
         self._scheduler: Any = None
         self._last_daily_needs: dict[str, float] = {}
+        self._last_weather: tuple[float, float] | None = None
         self._save_unsub: Any = None
+        self._weather_retry_unsub: Any = None
 
     # ------------------------------------------------------------------
     # Cycle de vie
@@ -86,7 +92,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         )
         self._scheduler = scheduler
 
-        self._entry.async_on_unload(tracker.setup())
+        self._entry.async_on_unload(await tracker.setup())
         self._entry.async_on_unload(scheduler.setup())
 
         @callback
@@ -94,19 +100,23 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             if self._save_unsub is not None:
                 self._save_unsub()
                 self._save_unsub = None
+            self._cancel_weather_retry()
 
         self._entry.async_on_unload(_cancel_pending_save)
 
         await self.async_config_entry_first_refresh()
 
-        if not self.config.cumulative_need and self.data is not None:
-            self.config.init_cumulative_need(
-                {cid: r.daily_need_liters for cid, r in self.data.crops.items()}
-            )
+        if self.data is not None:
+            daily_needs = {cid: r.daily_need_liters for cid, r in self.data.crops.items()}
+            new_crops_added = self.config.init_missing_crops(daily_needs)
+            # Toujours sauvegarder pour maintenir l'options_hash cohérent avec
+            # entry.options courant (évite l'invalidation des overrides entity
+            # lors d'un rechargement déclenché par l'OptionsFlow).
             await self._persistence.async_save(
                 self.config.to_storage(dt_util.now().date().isoformat())
             )
-            await self.async_refresh()
+            if new_crops_added:
+                await self._async_recompute_from_cache()
 
     # ------------------------------------------------------------------
     # Callbacks internes (appelés par ValveTracker et IrrigationScheduler)
@@ -140,8 +150,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         await self.async_refresh()
 
     async def _on_trigger(self, date_iso: str) -> None:
-        self.fire_irrigation_event()
-        await self.update_last_watering_date(date_iso)
+        if self.fire_irrigation_event():
+            await self.update_last_watering_date(date_iso)
 
     # ------------------------------------------------------------------
     # API publique — appelée par les entités HA
@@ -151,7 +161,6 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     def update_crop_field(self, crop_id: str, field: str, value: object) -> None:
         """Mise à jour silencieuse — réservée à async_added_to_hass (restauration boot)."""
         self.config.update_crop_field(crop_id, field, value)
-        self._schedule_config_save()
 
     async def async_update_crop_field(
         self, crop_id: str, field: str, value: object
@@ -163,9 +172,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             new_surface = self.config.get_crop_surfaces().get(crop_id, 0.0)
             if old_surface > 0 and new_surface > 0:
                 scale = new_surface / old_surface
-                self.config._cumulative_need[crop_id] = round(
-                    self.config.cumulative_need[crop_id] * scale, 3
-                )
+                self.config.scale_cumulative_need(crop_id, scale)
         else:
             self.config.update_crop_field(crop_id, field, value)
         await self._persistence.async_save(
@@ -176,32 +183,39 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     def set_flow_rate(self, value: float) -> None:
         self.config.set_flow_rate(value)
         self._schedule_config_save()
+        self._notify_listeners()
 
     def set_watering_interval_days(self, value: int) -> None:
         self.config.set_watering_interval_days(value)
         self._schedule_config_save()
+        self._notify_listeners()
 
     def set_watering_frequency(self, value: str) -> None:
         self.config.set_watering_frequency(value)
         self._schedule_config_save()
+        self._notify_listeners()
 
     def set_watering_mode(self, value: str) -> None:
         self.config.set_watering_mode(value)
         self._schedule_config_save()
+        self._notify_listeners()
 
     def set_irrigation_time(self, value: str) -> None:
         self.config.set_irrigation_time(value)
         if self._scheduler is not None:
             self._scheduler.reschedule_auto_irrigation()
         self._schedule_config_save()
+        self._notify_listeners()
 
     def set_cycles_count(self, value: int) -> None:
         self.config.set_cycles_count(value)
         self._schedule_config_save()
+        self._notify_listeners()
 
     def set_soak_duration_minutes(self, value: int) -> None:
         self.config.set_soak_duration_minutes(value)
         self._schedule_config_save()
+        self._notify_listeners()
 
     async def async_set_auto_irrigation(self, enabled: bool) -> None:
         self.config.set_auto_irrigation(enabled, dt_util.now().date().isoformat())
@@ -225,20 +239,24 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             self.config.to_storage(dt_util.now().date().isoformat())
         )
 
-    def fire_irrigation_event(self) -> None:
-        """Émet l'événement HA que le blueprint d'automatisation écoute."""
+    def fire_irrigation_event(self) -> bool:
+        """Émet l'événement HA que le blueprint d'automatisation écoute.
+
+        Retourne True si l'événement a été effectivement émis, False sinon.
+        L'appelant ne doit comptabiliser le déclenchement que si True est retourné.
+        """
         data = self.data
         if data is None:
             _LOGGER.warning(
                 "Arrosage impossible : les données météo ne sont pas encore disponibles. "
                 "Attendez le premier cycle de mise à jour (toutes les heures) avant de déclencher l'arrosage."
             )
-            return
+            return False
 
         total_cumulative = sum(data.cumulative_need.values())
         if total_cumulative <= 0:
             _LOGGER.debug("Arrosage auto : besoin cumulé = 0 L — événement non émis.")
-            return
+            return False
 
         flow_rate = self.config.flow_rate
         if flow_rate <= 0:
@@ -246,7 +264,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
                 "Arrosage auto : débit non configuré (%.1f L/h) — événement non émis.",
                 flow_rate,
             )
-            return
+            return False
 
         duration_minutes = round((total_cumulative / flow_rate) * 60, 1)
         is_fractioned = self.config.watering_mode == WATERING_MODE_FRACTIONED
@@ -263,7 +281,10 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             payload["cycles_count"] = cycles
             payload["duration_per_cycle_minutes"] = round(duration_minutes / cycles, 1)
             payload["soak_duration_minutes"] = self.config.soak_duration_minutes
+        else:
+            cycles = 1
 
+        self.config.begin_irrigation_session(cycles)
         self.hass.bus.async_fire(f"{DOMAIN}_irrigation_requested", payload)
         _LOGGER.info(
             "Événement %s_irrigation_requested émis — durée=%.1f min, mode=%s.",
@@ -271,6 +292,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             duration_minutes,
             self.config.watering_mode,
         )
+        return True
 
     # ------------------------------------------------------------------
     # Calcul principal
@@ -278,7 +300,20 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
     async def _async_update_data(self) -> IrrigationData:
         """Récupère ETo et précipitations puis calcule les besoins nets."""
-        eto_mm, precipitation_mm = await self._fetch_weather()
+        try:
+            eto_mm, precipitation_mm = await self._fetch_weather()
+            self._last_weather = (eto_mm, precipitation_mm)
+        except UpdateFailed as exc:
+            if self.data is not None:
+                _LOGGER.warning(
+                    "Open-Meteo inaccessible, nouvelle tentative dans %d min : %s",
+                    WEATHER_RETRY_INTERVAL.seconds // 60,
+                    exc,
+                )
+                self._schedule_weather_retry()
+                return self.data
+            raise
+        self._cancel_weather_retry()
         self.config.warn_unreasonable_surfaces()
         data = compute_irrigation_data(
             crops=self.config.crops,
@@ -291,6 +326,49 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         )
         self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
         return data
+
+    async def _async_recompute_from_cache(self) -> None:
+        """Recalcule IrrigationData depuis le cache météo, sans appel HTTP.
+
+        Utilisé après init_missing_crops pour éviter un second appel Open-Meteo
+        au premier démarrage. Met à jour self.data et notifie les listeners.
+        """
+        if self._last_weather is None:
+            return
+        eto_mm, precipitation_mm = self._last_weather
+        self.config.warn_unreasonable_surfaces()
+        data = compute_irrigation_data(
+            crops=self.config.crops,
+            kc_data=self._kc_data,
+            eto_mm=eto_mm,
+            precipitation_mm=precipitation_mm,
+            kc_getter=get_kc,
+            watering_applied_today=self.config.watering_applied_today,
+            cumulative_need=self.config.cumulative_need,
+        )
+        self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
+        self.async_set_updated_data(data)
+
+    @callback
+    def _schedule_weather_retry(self) -> None:
+        """Planifie une nouvelle tentative météo si aucune n'est déjà en attente."""
+        if self._weather_retry_unsub is not None:
+            return
+
+        @callback
+        def _do_retry(_now: object = None) -> None:
+            self._weather_retry_unsub = None
+            self.hass.async_create_task(self.async_refresh())
+
+        self._weather_retry_unsub = async_call_later(
+            self.hass, WEATHER_RETRY_INTERVAL.total_seconds(), _do_retry
+        )
+
+    @callback
+    def _cancel_weather_retry(self) -> None:
+        if self._weather_retry_unsub is not None:
+            self._weather_retry_unsub()
+            self._weather_retry_unsub = None
 
     async def _fetch_weather(self) -> tuple[float, float]:
         """Appelle Open-Meteo pour obtenir l'ETo et les précipitations du jour."""
@@ -307,23 +385,45 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             "forecast_days": 1,
         }
 
-        try:
-            async with session.get(
-                OPEN_METEO_URL, params=params, timeout=OPEN_METEO_TIMEOUT
-            ) as resp:
-                resp.raise_for_status()
-                data = await resp.json(content_type=None)
-        except Exception as exc:
+        response_data: dict | None = None
+        for attempt in range(3):
+            try:
+                async with session.get(
+                    OPEN_METEO_URL, params=params, timeout=OPEN_METEO_TIMEOUT
+                ) as resp:
+                    resp.raise_for_status()
+                    response_data = await resp.json(content_type=None)
+                break
+            except aiohttp.ClientResponseError as exc:
+                if exc.status in (502, 503, 504) and attempt < 2:
+                    delay = 10 * (attempt + 1)
+                    _LOGGER.warning(
+                        "Open-Meteo indisponible (HTTP %s), nouvelle tentative dans %ds (%d/3)…",
+                        exc.status,
+                        delay,
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise UpdateFailed(
+                        f"Erreur Open-Meteo (lat={lat}, lon={lon}) : {exc}"
+                    ) from exc
+            except Exception as exc:
+                raise UpdateFailed(
+                    f"Erreur Open-Meteo (lat={lat}, lon={lon}) : {exc}"
+                ) from exc
+
+        if response_data is None:
             raise UpdateFailed(
-                f"Erreur Open-Meteo (lat={lat}, lon={lon}) : {exc}"
-            ) from exc
+                f"Open-Meteo inaccessible après 3 tentatives (lat={lat}, lon={lon})"
+            )
 
         try:
-            daily = data["daily"]
+            daily = response_data["daily"]
             eto_mm = daily["et0_fao_evapotranspiration_sum"][0]
             precipitation_mm = daily["precipitation_sum"][0]
         except (KeyError, IndexError, TypeError) as exc:
-            raise UpdateFailed(f"Réponse Open-Meteo invalide : {data!r}") from exc
+            raise UpdateFailed(f"Réponse Open-Meteo invalide : {response_data!r}") from exc
 
         if eto_mm is None:
             raise UpdateFailed("L'ETo retourné par Open-Meteo est None.")
@@ -339,6 +439,18 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @callback
+    def _notify_listeners(self) -> None:
+        """Notifie les entités d'un changement de config sans appel météo.
+
+        Utilisé par les setters synchrones (set_flow_rate, set_watering_mode…)
+        pour que les capteurs dépendants (durée recommandée, mode affiché)
+        se rafraîchissent immédiatement — sans attendre le polling horaire.
+        N'annule pas le timer de polling contrairement à async_set_updated_data.
+        """
+        if self.data is not None:
+            self.async_update_listeners()
 
     def _schedule_config_save(self) -> None:
         """Planifie une sauvegarde avec debounce 0.5 s et gestion d'erreur."""

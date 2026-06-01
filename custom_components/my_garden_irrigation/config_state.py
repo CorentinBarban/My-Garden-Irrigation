@@ -105,6 +105,9 @@ class RuntimeConfigState:
         # Temps d'ouverture de la vanne (persisté pour réconciliation au redémarrage)
         self._valve_open_time: datetime | None = None
 
+        # Suivi de session fractionné (Cycle & Soak) — non persisté
+        self._session_remaining_closes: int = 0
+
     @classmethod
     def from_entry(cls, entry: ConfigEntry) -> RuntimeConfigState:
         """Construit l'état depuis une ConfigEntry HA."""
@@ -270,6 +273,17 @@ class RuntimeConfigState:
     def get_valve_open_time(self) -> datetime | None:
         return self._valve_open_time
 
+    def begin_irrigation_session(self, cycles: int) -> None:
+        """Démarre une session d'arrosage avec N fermetures attendues (Cycle & Soak ou simple)."""
+        self._session_remaining_closes = max(1, cycles)
+
+    def consume_session_close(self) -> bool:
+        """Enregistre une fermeture de vanne. Retourne True si c'est la dernière de la session."""
+        if self._session_remaining_closes <= 0:
+            return True
+        self._session_remaining_closes -= 1
+        return self._session_remaining_closes == 0
+
     def set_auto_irrigation(self, enabled: bool, now_date_iso: str) -> None:
         self._auto_enabled = enabled
         if enabled and self._last_auto_watering_date is None:
@@ -278,18 +292,32 @@ class RuntimeConfigState:
     def update_last_watering_date(self, date_iso: str) -> None:
         self._last_auto_watering_date = date_iso
 
+    def scale_cumulative_need(self, crop_id: str, scale: float) -> None:
+        """Rescale proportionnellement le besoin cumulé d'une culture.
+
+        Appelé lors d'un changement de surface (nb_plants ou densité) pour
+        maintenir la cohérence du bilan hydrique. Encapsule l'accès à
+        _cumulative_need — seule RuntimeConfigState doit le modifier directement.
+        """
+        if crop_id in self._cumulative_need:
+            self._cumulative_need[crop_id] = round(
+                self._cumulative_need[crop_id] * scale, 3
+            )
+
     # ------------------------------------------------------------------
     # Opérations bilan hydrique (pure Python, aucun I/O)
     # ------------------------------------------------------------------
 
     def apply_watering_volumes(self, volumes: dict[str, float]) -> None:
-        """Impute les volumes distribués par culture et remet le cumulé à zéro."""
+        """Impute les volumes distribués par culture et réduit le déficit cumulé en conséquence."""
         for crop_id, vol in volumes.items():
             self._watering_applied_today[crop_id] = (
                 self._watering_applied_today.get(crop_id, 0.0) + vol
             )
         for crop_id in self._get_crop_ids():
-            self._cumulative_need[crop_id] = 0.0
+            current = self._cumulative_need.get(crop_id, 0.0)
+            distributed = volumes.get(crop_id, 0.0)
+            self._cumulative_need[crop_id] = max(0.0, current - distributed)
 
     def apply_midnight_transfer(self, daily_needs: dict[str, float]) -> None:
         """Accumule les besoins journaliers au cumulé, remet le suivi du jour à zéro."""
@@ -308,6 +336,19 @@ class RuntimeConfigState:
     def init_cumulative_need(self, daily_needs: dict[str, float]) -> None:
         """Initialise le cumulé au premier démarrage depuis les besoins journaliers."""
         self._cumulative_need = dict(daily_needs)
+
+    def init_missing_crops(self, daily_needs: dict[str, float]) -> bool:
+        """Initialise le cumulé pour les cultures absentes du bilan.
+
+        Couvre le premier démarrage (bilan vide) et l'ajout d'une nouvelle culture
+        sur un système existant. Retourne True si au moins une entrée a été créée.
+        """
+        added = False
+        for crop_id, need in daily_needs.items():
+            if crop_id not in self._cumulative_need:
+                self._cumulative_need[crop_id] = need
+                added = True
+        return added
 
     # ------------------------------------------------------------------
     # Helpers

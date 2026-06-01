@@ -120,11 +120,11 @@ def test_midnight_reschedules_on_success():
 
 
 # ---------------------------------------------------------------------------
-# Fix #2 — coordinator : update_crop_field déclenche _schedule_config_save
+# Fix #2 — coordinator : update_crop_field (boot) ne déclenche aucune sauvegarde
 # ---------------------------------------------------------------------------
 
-def test_update_crop_field_triggers_save():
-    """`update_crop_field` doit appeler `_schedule_config_save()`."""
+def test_update_crop_field_memory_only():
+    """`update_crop_field` met à jour la mémoire sans déclencher de sauvegarde Store."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     crop = {
@@ -145,7 +145,7 @@ def test_update_crop_field_triggers_save():
     coord = FakeCoord()
     IrrigationCoordinator.update_crop_field(coord, "c1", CONF_NB_PLANTS, 25)
 
-    assert coord._save_calls == [1], "update_crop_field doit appeler _schedule_config_save()"
+    assert coord._save_calls == [], "update_crop_field (boot) ne doit pas déclencher de sauvegarde"
     assert coord.config.crops[0][CONF_NB_PLANTS] == 25
 
 
@@ -303,9 +303,13 @@ def test_async_update_data_caches_daily_needs():
         def __init__(self) -> None:
             self.config = _make_state()
             self._kc_data = {}
+            self.data = None
 
         async def _fetch_weather(self):
             return 4.0, 0.0
+
+        def _cancel_weather_retry(self) -> None:
+            pass
 
     coord = FakeCoord()
 
@@ -325,11 +329,11 @@ def test_async_update_data_caches_daily_needs():
 def test_restore_valve_state_catches_exception(caplog):
     """`_restore_valve_state` doit logguer un warning si une exception survient."""
     from custom_components.my_garden_irrigation.valve_tracker import ValveTracker
+    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
 
     hass = MagicMock()
     hass.states.get = MagicMock(side_effect=RuntimeError("HA not ready"))
 
-    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
     config = _make_state(**{CONF_GLOBAL_VALVE_ENTITY_ID: "switch.vanne"})
 
     tracker = ValveTracker(hass, config, AsyncMock())
@@ -345,11 +349,11 @@ def test_restore_valve_state_catches_exception(caplog):
 def test_restore_valve_state_no_crash_on_unknown_valve():
     """`_restore_valve_state` ne plante pas si la vanne retourne None."""
     from custom_components.my_garden_irrigation.valve_tracker import ValveTracker
+    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
 
     hass = MagicMock()
     hass.states.get = MagicMock(return_value=None)
 
-    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
     config = _make_state(**{CONF_GLOBAL_VALVE_ENTITY_ID: "switch.vanne"})
 
     tracker = ValveTracker(hass, config, AsyncMock())
@@ -365,8 +369,7 @@ def test_valve_tracker_warns_when_no_valve_id(caplog):
     from custom_components.my_garden_irrigation.valve_tracker import ValveTracker
 
     hass = MagicMock()
-    # async_create_task reçoit une coroutine — on la ferme pour éviter le RuntimeWarning
-    hass.async_create_task.side_effect = lambda coro: coro.close()
+    hass.states.get = MagicMock(return_value=None)
     config = _make_state()  # valve_entity_id = None par défaut
 
     tracker = ValveTracker(hass, config, AsyncMock())
@@ -374,10 +377,105 @@ def test_valve_tracker_warns_when_no_valve_id(caplog):
     with caplog.at_level(
         logging.WARNING, logger="custom_components.my_garden_irrigation.valve_tracker"
     ):
-        cleanup = tracker.setup()
+        cleanup = _run(tracker.setup())
 
     assert "Aucune vanne globale configurée" in caplog.text
     cleanup()  # le callable de nettoyage ne doit pas crasher
+
+
+# ---------------------------------------------------------------------------
+# Mode Cycle & Soak — ValveTracker accumulation inter-cycles
+# ---------------------------------------------------------------------------
+
+def _make_valve_tracker_env(cycles: int, flow_rate: float = 360.0):
+    """Crée un ValveTracker configuré pour N cycles avec crop c1 (1 m²)."""
+    from custom_components.my_garden_irrigation.valve_tracker import ValveTracker
+    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
+
+    config = _make_state(**{
+        CONF_GLOBAL_VALVE_ENTITY_ID: "switch.vanne",
+        CONF_GLOBAL_FLOW_RATE: flow_rate,
+    })
+    config.begin_irrigation_session(cycles)
+
+    callback = AsyncMock()
+    hass = MagicMock()
+    tracker = ValveTracker(hass, config, callback)
+    return tracker, config, callback
+
+
+def _simulate_close(tracker, config, open_dt, close_dt):
+    """Simule une fermeture de vanne avec mocking du temps."""
+    from unittest.mock import patch
+
+    config.set_valve_open_time(open_dt)
+    with patch("custom_components.my_garden_irrigation.valve_tracker.dt_util") as mock_dt:
+        mock_dt.utcnow.return_value = close_dt
+        with patch.object(config, "get_crop_surfaces", return_value={"c1": 1.0}):
+            _run(tracker._handle_valve_close())
+
+
+def test_valve_tracker_defers_callback_on_intermediate_closes():
+    """En mode fractionné (3 cycles), le callback n'est déclenché qu'à la 3e fermeture."""
+    from datetime import datetime, timezone, timedelta
+
+    tracker, config, callback = _make_valve_tracker_env(cycles=3)
+    t0 = datetime(2024, 1, 1, 6, 0, 0, tzinfo=timezone.utc)
+    t10 = t0 + timedelta(minutes=10)
+
+    _simulate_close(tracker, config, t0, t10)
+    callback.assert_not_called()
+
+    _simulate_close(tracker, config, t0, t10)
+    callback.assert_not_called()
+
+    _simulate_close(tracker, config, t0, t10)
+    callback.assert_called_once()
+
+
+def test_valve_tracker_accumulates_volumes_from_all_cycles():
+    """Le callback reçoit la somme des volumes de tous les cycles (3 × 10 min à 360 L/h = 180 L)."""
+    from datetime import datetime, timezone, timedelta
+
+    tracker, config, callback = _make_valve_tracker_env(cycles=3, flow_rate=360.0)
+    t0 = datetime(2024, 1, 1, 6, 0, 0, tzinfo=timezone.utc)
+    t10 = t0 + timedelta(minutes=10)  # 10 min → 60 L par cycle
+
+    _simulate_close(tracker, config, t0, t10)
+    _simulate_close(tracker, config, t0, t10)
+    _simulate_close(tracker, config, t0, t10)
+
+    volumes = callback.call_args[0][0]
+    assert volumes["c1"] == pytest.approx(180.0)  # 3 × 60 L
+
+
+def test_valve_tracker_single_cycle_fires_immediately():
+    """En mode continu (1 cycle), le callback est déclenché immédiatement à la fermeture."""
+    from datetime import datetime, timezone, timedelta
+
+    tracker, config, callback = _make_valve_tracker_env(cycles=1, flow_rate=360.0)
+    t0 = datetime(2024, 1, 1, 6, 0, 0, tzinfo=timezone.utc)
+    t10 = t0 + timedelta(minutes=10)
+
+    _simulate_close(tracker, config, t0, t10)
+    callback.assert_called_once()
+    volumes = callback.call_args[0][0]
+    assert volumes["c1"] == pytest.approx(60.0)
+
+
+def test_valve_tracker_no_session_fires_immediately():
+    """Sans session active (fermeture manuelle), le callback est déclenché immédiatement."""
+    from datetime import datetime, timezone, timedelta
+
+    tracker, config, callback = _make_valve_tracker_env(cycles=1, flow_rate=360.0)
+    # On ne démarre pas de session — simule une ouverture manuelle
+    config._session_remaining_closes = 0
+
+    t0 = datetime(2024, 1, 1, 6, 0, 0, tzinfo=timezone.utc)
+    t10 = t0 + timedelta(minutes=1)
+
+    _simulate_close(tracker, config, t0, t10)
+    callback.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -685,3 +783,402 @@ def test_cleanup_removes_irrigation_sensor_no_suffix():
     with p1, p2:
         _cleanup_removed_crop_entities(MagicMock(), entry, set())
     registry.async_remove.assert_called_once_with(entity.entity_id)
+
+
+# ===========================================================================
+# NOUVEAUX TESTS — 6 bugs identifiés lors de l'analyse approfondie
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Bug #1 — Reset Fantôme : la date n'est mise à jour QUE si l'événement a été émis
+# ---------------------------------------------------------------------------
+
+def test_on_trigger_no_date_update_when_event_skipped():
+    """`_on_trigger` ne met pas à jour la date si fire_irrigation_event() retourne False."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        _date_updated = False
+
+        def fire_irrigation_event(self) -> bool:
+            return False  # besoin cumulé = 0, événement non émis
+
+        async def update_last_watering_date(self, date_iso: str) -> None:
+            FakeCoord._date_updated = True
+
+    coord = FakeCoord()
+    _run(IrrigationCoordinator._on_trigger(coord, "2026-06-01"))
+
+    assert not coord._date_updated, (
+        "La date du dernier arrosage ne doit pas être mise à jour si aucune eau n'a été demandée"
+    )
+
+
+def test_on_trigger_updates_date_when_event_fired():
+    """`_on_trigger` met à jour la date si fire_irrigation_event() retourne True."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        _date_updated = False
+        _persistence = MagicMock()
+        _persistence.async_save = AsyncMock()
+
+        def __init__(self):
+            self.config = _make_state()
+
+        def fire_irrigation_event(self) -> bool:
+            return True
+
+        async def update_last_watering_date(self, date_iso: str) -> None:
+            FakeCoord._date_updated = True
+
+    coord = FakeCoord()
+    _run(IrrigationCoordinator._on_trigger(coord, "2026-06-01"))
+
+    assert coord._date_updated
+
+
+def test_fire_irrigation_event_returns_false_when_cumulative_zero():
+    """`fire_irrigation_event` retourne False si le besoin cumulé est nul."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        hass = MagicMock()
+        _entry = MagicMock()
+        _entry.entry_id = "test"
+
+        def __init__(self):
+            self.config = _make_state(**{CONF_GLOBAL_FLOW_RATE: 300.0})
+            self.data = MagicMock()
+            self.data.cumulative_need = {"c1": 0.0}  # besoin nul
+
+    coord = FakeCoord()
+    result = IrrigationCoordinator.fire_irrigation_event(coord)
+
+    assert result is False
+    coord.hass.bus.async_fire.assert_not_called()
+
+
+def test_fire_irrigation_event_returns_true_when_fired():
+    """`fire_irrigation_event` retourne True si l'événement est émis."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        hass = MagicMock()
+        _entry = MagicMock()
+        _entry.entry_id = "test"
+
+        def __init__(self):
+            self.config = _make_state(**{CONF_GLOBAL_FLOW_RATE: 300.0})
+            self.data = MagicMock()
+            self.data.cumulative_need = {"c1": 10.0}
+
+    coord = FakeCoord()
+    result = IrrigationCoordinator.fire_irrigation_event(coord)
+
+    assert result is True
+    coord.hass.bus.async_fire.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Bug #3 — États réseau : _was_open survit aux états unavailable/unknown
+# ---------------------------------------------------------------------------
+
+def _make_event(new_state_str: str, old_state_str: str = "on"):
+    """Crée un faux événement de changement d'état de vanne."""
+    old = MagicMock()
+    old.state = old_state_str
+    new = MagicMock()
+    new.state = new_state_str
+    event = MagicMock()
+    event.data = {"old_state": old, "new_state": new}
+    return event
+
+
+def test_unavailable_does_not_reset_was_open():
+    """`unavailable` après `open` ne remet pas _was_open à False."""
+    from custom_components.my_garden_irrigation.valve_tracker import ValveTracker
+    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
+
+    config = _make_state(**{CONF_GLOBAL_VALVE_ENTITY_ID: "switch.vanne"})
+    tracker = ValveTracker(MagicMock(), config, AsyncMock())
+    tracker._was_open = True
+    config.set_valve_open_time(MagicMock())  # simule une vanne ouverte
+
+    tracker._handle_valve_state_change(_make_event("unavailable"))
+
+    assert tracker._was_open is True, "_was_open doit rester True pendant unavailable"
+
+
+def test_unknown_does_not_reset_was_open():
+    """`unknown` après `open` ne remet pas _was_open à False."""
+    from custom_components.my_garden_irrigation.valve_tracker import ValveTracker
+    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
+
+    config = _make_state(**{CONF_GLOBAL_VALVE_ENTITY_ID: "switch.vanne"})
+    tracker = ValveTracker(MagicMock(), config, AsyncMock())
+    tracker._was_open = True
+
+    tracker._handle_valve_state_change(_make_event("unknown"))
+
+    assert tracker._was_open is True
+
+
+def test_close_after_unavailable_triggers_handle_close():
+    """`open → unavailable → closed` : la fermeture est correctement détectée."""
+    from custom_components.my_garden_irrigation.valve_tracker import ValveTracker
+    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
+
+    hass = MagicMock()
+    # Fermer la coroutine pour éviter RuntimeWarning : coroutine never awaited
+    hass.async_create_task.side_effect = lambda coro: coro.close()
+    config = _make_state(**{
+        CONF_GLOBAL_VALVE_ENTITY_ID: "switch.vanne",
+        CONF_GLOBAL_FLOW_RATE: 300.0,
+    })
+    tracker = ValveTracker(hass, config, AsyncMock())
+    tracker._was_open = True
+    config.set_valve_open_time(MagicMock())
+
+    tracker._handle_valve_state_change(_make_event("unavailable"))
+    assert tracker._was_open  # toujours ouvert
+
+    tracker._handle_valve_state_change(_make_event("off", "unavailable"))
+    assert not tracker._was_open  # fermé maintenant
+    hass.async_create_task.assert_called_once()  # _handle_valve_close déclenché
+
+
+def test_open_after_unavailable_sets_open_time_once():
+    """`closed → unavailable → open` : l'ouverture n'est enregistrée qu'une fois."""
+    from custom_components.my_garden_irrigation.valve_tracker import ValveTracker
+    from custom_components.my_garden_irrigation.const import CONF_GLOBAL_VALVE_ENTITY_ID
+
+    config = _make_state(**{CONF_GLOBAL_VALVE_ENTITY_ID: "switch.vanne"})
+    tracker = ValveTracker(MagicMock(), config, AsyncMock())
+    tracker._was_open = False
+
+    tracker._handle_valve_state_change(_make_event("unavailable", "off"))
+    assert not tracker._was_open  # toujours fermé
+
+    with patch("custom_components.my_garden_irrigation.valve_tracker.dt_util") as mock_dt:
+        mock_dt.utcnow.return_value = MagicMock()
+        tracker._handle_valve_state_change(_make_event("on", "unavailable"))
+
+    assert tracker._was_open  # ouvert maintenant
+    assert config.get_valve_open_time() is not None
+
+
+# ---------------------------------------------------------------------------
+# Bug #4 — Affichage figé : les listeners sont notifiés après un set_*
+# ---------------------------------------------------------------------------
+
+def test_set_flow_rate_notifies_listeners():
+    """`set_flow_rate` notifie les listeners sans déclencher d'appel météo."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        _save_calls: list = []
+        _notify_calls: list = []
+
+        def __init__(self):
+            self.config = _make_state()
+            self.data = MagicMock()  # non-None → listeners notifiés
+
+        def _schedule_config_save(self) -> None:
+            self._save_calls.append(1)
+
+        def _notify_listeners(self) -> None:
+            self._notify_calls.append(1)
+
+    coord = FakeCoord()
+    IrrigationCoordinator.set_flow_rate(coord, 450.0)
+
+    assert coord.config.flow_rate == pytest.approx(450.0)
+    assert coord._save_calls == [1]
+    assert coord._notify_calls == [1]
+
+
+def test_set_watering_mode_notifies_listeners():
+    """`set_watering_mode` notifie les listeners."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        _notify_calls: list = []
+
+        def __init__(self):
+            self.config = _make_state()
+            self.data = MagicMock()
+
+        def _schedule_config_save(self) -> None:
+            pass
+
+        def _notify_listeners(self) -> None:
+            self._notify_calls.append(1)
+
+    coord = FakeCoord()
+    IrrigationCoordinator.set_watering_mode(coord, WATERING_MODE_FRACTIONED)
+
+    assert coord._notify_calls == [1]
+
+
+def test_notify_listeners_noop_when_no_data():
+    """`_notify_listeners` ne lève pas si self.data est None."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        data = None
+        _listener_calls: list = []
+
+        def async_update_listeners(self) -> None:
+            self._listener_calls.append(1)
+
+    coord = FakeCoord()
+    IrrigationCoordinator._notify_listeners(coord)
+
+    assert coord._listener_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Bug #5 — Double-polling : _async_recompute_from_cache évite le 2e appel HTTP
+# ---------------------------------------------------------------------------
+
+def test_async_recompute_from_cache_uses_cached_weather():
+    """`_async_recompute_from_cache` utilise le cache météo sans appel HTTP."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+    from custom_components.my_garden_irrigation.core.models import IrrigationData
+
+    fake_data = MagicMock(spec=IrrigationData)
+    fake_data.crops = {}
+
+    class FakeCoord:
+        _last_weather = (3.5, 1.2)
+        _last_daily_needs: dict = {}
+
+        def __init__(self):
+            self.config = _make_state()
+            self._kc_data = {}
+            self._updated_data = None
+
+        def async_set_updated_data(self, data) -> None:
+            self._updated_data = data
+
+    coord = FakeCoord()
+
+    with patch(
+        "custom_components.my_garden_irrigation.coordinator.compute_irrigation_data",
+        return_value=fake_data,
+    ) as mock_compute:
+        _run(IrrigationCoordinator._async_recompute_from_cache(coord))
+
+    mock_compute.assert_called_once()
+    call_kwargs = mock_compute.call_args[1]
+    assert call_kwargs["eto_mm"] == pytest.approx(3.5)
+    assert call_kwargs["precipitation_mm"] == pytest.approx(1.2)
+    assert coord._updated_data is fake_data
+
+
+def test_async_recompute_from_cache_noop_when_no_cache():
+    """`_async_recompute_from_cache` ne fait rien si le cache météo est absent."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        _last_weather = None
+        _updated = False
+
+        def __init__(self):
+            self.config = _make_state()
+
+        def async_set_updated_data(self, data) -> None:
+            self._updated = True
+
+    coord = FakeCoord()
+
+    with patch(
+        "custom_components.my_garden_irrigation.coordinator.compute_irrigation_data"
+    ) as mock_compute:
+        _run(IrrigationCoordinator._async_recompute_from_cache(coord))
+
+    mock_compute.assert_not_called()
+    assert not coord._updated
+
+
+def test_async_update_data_caches_last_weather():
+    """`_async_update_data` stocke le résultat météo dans _last_weather."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+    from custom_components.my_garden_irrigation.core.models import IrrigationData
+
+    fake_data = MagicMock(spec=IrrigationData)
+    fake_data.crops = {}
+
+    class FakeCoord:
+        _last_daily_needs: dict = {}
+
+        def __init__(self):
+            self.config = _make_state()
+            self._kc_data = {}
+            self.data = None
+
+        async def _fetch_weather(self):
+            return 5.0, 2.0
+
+        def _cancel_weather_retry(self) -> None:
+            pass
+
+    coord = FakeCoord()
+
+    with patch(
+        "custom_components.my_garden_irrigation.coordinator.compute_irrigation_data",
+        return_value=fake_data,
+    ):
+        _run(IrrigationCoordinator._async_update_data(coord))
+
+    assert hasattr(coord, "_last_weather")
+    assert coord._last_weather == (pytest.approx(5.0), pytest.approx(2.0))
+
+
+# ---------------------------------------------------------------------------
+# Bug #6 — Encapsulation : scale_cumulative_need() dans RuntimeConfigState
+# ---------------------------------------------------------------------------
+
+def test_scale_cumulative_need_scales_correctly():
+    """`scale_cumulative_need` multiplie le cumulé par le facteur donné."""
+    state = _make_state()
+    state._cumulative_need = {"c1": 20.0}
+
+    state.scale_cumulative_need("c1", 2.0)
+
+    assert state.cumulative_need["c1"] == pytest.approx(40.0)
+
+
+def test_scale_cumulative_need_rounding():
+    """`scale_cumulative_need` arrondit à 3 décimales."""
+    state = _make_state()
+    state._cumulative_need = {"c1": 10.0}
+
+    state.scale_cumulative_need("c1", 1 / 3)
+
+    assert state.cumulative_need["c1"] == pytest.approx(3.333, abs=0.001)
+
+
+def test_scale_cumulative_need_missing_crop_no_crash():
+    """`scale_cumulative_need` ignore un crop_id inexistant sans exception."""
+    state = _make_state()
+    state._cumulative_need = {}
+
+    state.scale_cumulative_need("inexistant", 3.0)  # ne doit pas lever
+
+    assert state.cumulative_need == {}
+
+
+def test_async_update_crop_field_uses_scale_method():
+    """async_update_crop_field n'accède plus à config._cumulative_need directement."""
+    import inspect
+    from custom_components.my_garden_irrigation import coordinator as coord_module
+
+    source = inspect.getsource(coord_module.IrrigationCoordinator.async_update_crop_field)
+    # On vérifie l'absence d'accès direct à l'attribut privé (config._cumulative_need[...]).
+    # La présence du nom de méthode scale_cumulative_need est normale.
+    assert "._cumulative_need" not in source, (
+        "async_update_crop_field ne doit plus accéder directement à config._cumulative_need ; "
+        "utiliser config.scale_cumulative_need() à la place."
+    )

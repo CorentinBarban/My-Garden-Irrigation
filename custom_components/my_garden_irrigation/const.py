@@ -132,12 +132,7 @@ ATTR_SOAK_DURATION_MINUTES = "soak_duration_minutes"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 OPEN_METEO_TIMEOUT = 10  # secondes
 
-# --- Données Kc distantes (ADR-001) ---
-KC_REMOTE_URL = (
-    "https://raw.githubusercontent.com/CorentinBarban/My-Garden-Irrigation"
-    "/main/data/kc_fao56.json"
-)
-KC_FETCH_TIMEOUT = 10  # secondes
+# --- Données Kc embarquées (ADR-001) ---
 KC_CACHE_KEY = f"{DOMAIN}_kc_data"
 
 # --- Arrosage automatique (planifié par la centrale) ---

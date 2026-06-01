@@ -36,14 +36,21 @@ class ValveTracker:
         self._hass = hass
         self._config = config
         self._on_volumes_applied = on_volumes_applied
+        self._accumulated_session_volumes: dict[str, float] = {}
+        # Dernier état binaire connu (True = ouverte). Permet de survivre aux
+        # états intermédiaires unavailable/unknown sans rater une fermeture.
+        self._was_open: bool = False
 
-    def setup(self) -> Callable:
-        """Inscrit le listener et restaure l'état de la vanne.
+    async def setup(self) -> Callable:
+        """Inscrit le listener et restaure l'état de la vanne (awaitable).
+
+        Attendre cette coroutine garantit que la restauration est terminée
+        avant async_config_entry_first_refresh — élimine la race condition.
 
         Returns:
             Callable de nettoyage à passer à entry.async_on_unload().
         """
-        self._hass.async_create_task(self._restore_valve_state())
+        await self._restore_valve_state()
 
         valve_id: str | None = self._config.valve_entity_id
         if not valve_id:
@@ -76,6 +83,7 @@ class ValveTracker:
 
             current = state.state
             if current in _OPEN_STATES:
+                self._was_open = True
                 if self._config.get_valve_open_time() is None:
                     self._config.set_valve_open_time(dt_util.utcnow())
                     _LOGGER.warning(
@@ -83,12 +91,14 @@ class ValveTracker:
                         "décompte du volume depuis maintenant.",
                         valve_id,
                     )
-            elif current in _CLOSED_STATES and self._config.get_valve_open_time() is not None:
-                _LOGGER.info(
-                    "Vanne %s fermée pendant le redémarrage — comptabilisation du volume.",
-                    valve_id,
-                )
-                await self._handle_valve_close()
+            elif current in _CLOSED_STATES:
+                self._was_open = False
+                if self._config.get_valve_open_time() is not None:
+                    _LOGGER.info(
+                        "Vanne %s fermée pendant le redémarrage — comptabilisation du volume.",
+                        valve_id,
+                    )
+                    await self._handle_valve_close()
         except Exception as exc:
             _LOGGER.warning(
                 "Erreur lors de la restauration de l'état de la vanne : %s", exc
@@ -96,24 +106,33 @@ class ValveTracker:
 
     @callback
     def _handle_valve_state_change(self, event: Event) -> None:
-        """Détecte l'ouverture/fermeture et délègue."""
+        """Détecte l'ouverture/fermeture et délègue.
+
+        Utilise _was_open (dernier état binaire connu) plutôt qu'une comparaison
+        old→new stricte. Cela permet de traverser les états intermédiaires
+        unavailable/unknown (fréquents sur Z-Wave/Zigbee) sans rater une
+        fermeture ni injecter de volume fantôme.
+        """
         old_state = event.data.get("old_state")
         new_state = event.data.get("new_state")
         if old_state is None or new_state is None:
             return
 
-        old = old_state.state
         new = new_state.state
 
-        if old in _CLOSED_STATES and new in _OPEN_STATES:
-            self._config.set_valve_open_time(dt_util.utcnow())
-            _LOGGER.debug("Vanne ouverte à %s", self._config.get_valve_open_time())
-
-        elif old in _OPEN_STATES and new in _CLOSED_STATES:
-            self._hass.async_create_task(self._handle_valve_close())
+        if new in _OPEN_STATES:
+            if not self._was_open:
+                self._config.set_valve_open_time(dt_util.utcnow())
+                _LOGGER.debug("Vanne ouverte à %s", self._config.get_valve_open_time())
+            self._was_open = True
+        elif new in _CLOSED_STATES:
+            if self._was_open:
+                self._hass.async_create_task(self._handle_valve_close())
+            self._was_open = False
+        # unavailable/unknown : état intermédiaire — _was_open conservé
 
     async def _handle_valve_close(self) -> None:
-        """Calcule le volume distribué, le ventile par culture et notifie le coordinator."""
+        """Calcule le volume distribué, l'accumule par session et notifie à la dernière fermeture."""
         open_time = self._config.get_valve_open_time()
         if open_time is None:
             return
@@ -132,7 +151,19 @@ class ValveTracker:
 
         if total_volume > 0:
             surfaces = self._config.get_crop_surfaces()
-            volumes = allocate_volume_by_surface(total_volume, surfaces)
-            await self._on_volumes_applied(volumes)
+            cycle_volumes = allocate_volume_by_surface(total_volume, surfaces)
+            for crop_id, vol in cycle_volumes.items():
+                self._accumulated_session_volumes[crop_id] = (
+                    self._accumulated_session_volumes.get(crop_id, 0.0) + vol
+                )
+
+        is_last_close = self._config.consume_session_close()
+        if is_last_close:
+            await self._on_volumes_applied(self._accumulated_session_volumes)
+            self._accumulated_session_volumes = {}
         else:
-            await self._on_volumes_applied({})
+            _LOGGER.debug(
+                "Fermeture intermédiaire (Cycle & Soak) — volume accumulé=%.1fL, "
+                "comptabilisation différée.",
+                sum(self._accumulated_session_volumes.values()),
+            )
