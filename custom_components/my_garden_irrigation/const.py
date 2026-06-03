@@ -147,3 +147,8 @@ SERVICE_RECALCULATE = "recalculate"
 
 # --- Validation ---
 MAX_REASONABLE_SURFACE_M2 = 10_000
+
+# --- Arrosage tardif (Règle 2 spec) ---
+EVENING_IRRIGATION_HOUR_THRESHOLD = 12
+"""Heure (incluse) à partir de laquelle l'arrosage est considéré tardif.
+Un arrosage tardif inclut le besoin journalier en cours dans son volume cible."""
