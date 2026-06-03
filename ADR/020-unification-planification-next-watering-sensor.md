@@ -1,7 +1,7 @@
 # 020 — Unification de la logique de planification temporelle pour NextWateringSensor
 
 **Date** : 2026-06-01  
-**Statut** : Proposé  
+**Statut** : Implémenté  
 **Décideurs** : Équipe projet
 
 ---

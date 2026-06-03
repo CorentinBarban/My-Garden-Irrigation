@@ -1,7 +1,7 @@
 # 019 — Imputation comptable réelle des volumes d'arrosage et préservation du déficit cumulé
 
 **Date** : 2026-06-01  
-**Statut** : Proposé  
+**Statut** : Implémenté  
 **Décideurs** : Équipe projet
 
 ---

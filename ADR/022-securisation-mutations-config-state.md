@@ -1,7 +1,7 @@
 # 022 — Sécurisation des mutations d'états et programmation défensive dans RuntimeConfigState
 
 **Date** : 2026-06-01  
-**Statut** : Proposé  
+**Statut** : Implémenté  
 **Décideurs** : Équipe projet
 
 ---

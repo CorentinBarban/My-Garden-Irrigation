@@ -1,7 +1,7 @@
 # 021 — Conditionnement du calendrier d'intervalle à l'émission effective de l'événement
 
 **Date** : 2026-06-01  
-**Statut** : Proposé  
+**Statut** : Obsolète — supersédé par ADR-025  
 **Décideurs** : Équipe projet
 
 ---
