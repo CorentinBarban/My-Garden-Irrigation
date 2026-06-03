@@ -413,3 +413,42 @@ def test_consume_session_close_without_active_session_returns_true():
     """Sans session active (compteur à 0), toute fermeture est traitée comme finale."""
     state = _make_state()
     assert state.consume_session_close() is True
+
+
+# ---------------------------------------------------------------------------
+# apply_midnight_transfer — déduction arrosage (Règle 1 spec)
+# ---------------------------------------------------------------------------
+
+def test_apply_midnight_transfer_deducts_watering_to_zero():
+    """Scénario I spec : arrosage matinal couvre cumul + journalier → dette = 0 au matin J+1."""
+    state = _make_state(**{CONF_CROPS: [_crop("c1")]})
+    # cumul déjà soldé par apply_watering_volumes (simulate post-morning-irrigation state)
+    state._cumulative_need = {"c1": 0.0}
+    state._watering_applied_today = {"c1": 8.0}
+
+    state.apply_midnight_transfer({"c1": 4.0})
+
+    assert state.cumulative_need["c1"] == pytest.approx(0.0)
+    assert state.watering_applied_today == {}   # remis à zéro
+
+def test_apply_midnight_transfer_residual_debt():
+    """Arrosage partiel : dette résiduelle = cumul + journalier - arrosé."""
+    state = _make_state(**{CONF_CROPS: [_crop("c1")]})
+    state._cumulative_need = {"c1": 5.0}
+    state._watering_applied_today = {"c1": 3.0}
+
+    state.apply_midnight_transfer({"c1": 2.0})
+
+    # max(0, 5 + 2 - 3) = 4
+    assert state.cumulative_need["c1"] == pytest.approx(4.0)
+    assert state.watering_applied_today == {}
+
+def test_apply_midnight_transfer_no_watering_accumulates_normally():
+    """Sans arrosage dans la journée, accumulation simple (comportement antérieur)."""
+    state = _make_state(**{CONF_CROPS: [_crop("c1")]})
+    state._cumulative_need = {"c1": 6.0}
+    state._watering_applied_today = {}
+
+    state.apply_midnight_transfer({"c1": 2.0})
+
+    assert state.cumulative_need["c1"] == pytest.approx(8.0)
