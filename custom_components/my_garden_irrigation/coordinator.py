@@ -26,19 +26,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .config_state import RuntimeConfigState
-from .core.ledger import (
-    DailyWaterLedger,
-    InclusiveEveningStrategy,
-    StandardMorningStrategy,
-    WaterSource,
-    WaterTransaction,
-    WateringVolumeStrategy,
-)
+from .core.journal import DailyWaterLedger, WaterSource, WaterTransaction
+from .core.ledger import MidnightClosureOrchestrator
+from .core.strategies import WateringStrategyFactory, WateringVolumeStrategy
 from .const import (
     CONF_DENSITY,
     CONF_NB_PLANTS,
     DOMAIN,
-    EVENING_IRRIGATION_HOUR_THRESHOLD,
     OPEN_METEO_TIMEOUT,
     OPEN_METEO_URL,
     WATERING_MODE_FRACTIONED,
@@ -159,15 +153,24 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         return {}
 
     async def _on_midnight(self) -> None:
+        _orch = MidnightClosureOrchestrator()
+
         if self._daily_ledger:
-            # ADR-026 : replay du journal — net par culture, déjà déduit des arrosages
+            # ADR-026 : replay du journal — solde net déjà déduit des arrosages
             daily_balance = self._daily_ledger.replay()
-            self.config.apply_midnight_transfer_from_balance(daily_balance)
+            # ADR-023 : orchestrateur encode l'invariant étape 2 (pas de double-déduction)
+            new_cumulative = _orch.execute(
+                self.config.cumulative_need, daily_balance, {}
+            )
         else:
             # Fallback : chemin classique si le journal est vide (démarrage sans données)
             daily_needs = self._resolve_daily_needs()
-            self.config.apply_midnight_transfer(daily_needs)
-        self._daily_ledger = DailyWaterLedger()           # réinitialisation du journal
+            new_cumulative = _orch.execute(
+                self.config.cumulative_need, daily_needs, self.config.watering_applied_today
+            )
+
+        self.config.apply_midnight_result(new_cumulative)   # étapes 2+4 atomiques
+        self._daily_ledger = DailyWaterLedger()             # réinitialisation du journal
         await self._persistence.async_save(self._build_storage())
         await self.async_refresh()
 
@@ -279,13 +282,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
     def _resolve_watering_strategy(self) -> WateringVolumeStrategy:
         """Sélectionne la stratégie de calcul du volume selon l'heure d'arrosage (ADR-024)."""
-        try:
-            hour = int(self.config.irrigation_time.split(":")[0])
-            if hour >= EVENING_IRRIGATION_HOUR_THRESHOLD:
-                return InclusiveEveningStrategy()
-        except (ValueError, AttributeError, IndexError):
-            pass
-        return StandardMorningStrategy()
+        return WateringStrategyFactory.from_irrigation_time(self.config.irrigation_time)
 
     def fire_irrigation_event(self) -> bool:
         """Émet l'événement HA que le blueprint d'automatisation écoute.
@@ -308,7 +305,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         total_volume = strategy.calculate_target_volume(
             total_cumulative, data.total_daily_need_liters
         )
-        is_evening = isinstance(strategy, InclusiveEveningStrategy)
+        is_evening = total_volume > total_cumulative
 
         if total_volume <= 0:
             _LOGGER.debug(

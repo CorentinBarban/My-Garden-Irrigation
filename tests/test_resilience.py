@@ -23,7 +23,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.my_garden_irrigation.config_state import RuntimeConfigState
-from custom_components.my_garden_irrigation.core.ledger import DailyWaterLedger
+from custom_components.my_garden_irrigation.core.journal import DailyWaterLedger
 from custom_components.my_garden_irrigation.const import (
     CONF_CROPS,
     CONF_CROP_ID,

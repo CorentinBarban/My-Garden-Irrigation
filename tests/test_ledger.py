@@ -1,19 +1,30 @@
-"""Tests des opérations comptables du bilan hydrique (core/ledger.py).
+"""Tests des opérations comptables du bilan hydrique.
 
 Fonctions pures — aucune dépendance HA, aucun mock nécessaire.
+
+Modules couverts :
+  core/ledger.py     — allocate_volume_by_surface, midnight_transfer, MidnightClosureOrchestrator
+  core/strategies.py — StandardMorningStrategy, InclusiveEveningStrategy, WateringStrategyFactory
+  core/journal.py    — WaterSource, WaterTransaction, DailyWaterLedger
 """
 from datetime import datetime
 
 import pytest
 
-from custom_components.my_garden_irrigation.core.ledger import (
+from custom_components.my_garden_irrigation.core.journal import (
     DailyWaterLedger,
-    InclusiveEveningStrategy,
-    StandardMorningStrategy,
     WaterSource,
     WaterTransaction,
+)
+from custom_components.my_garden_irrigation.core.ledger import (
+    MidnightClosureOrchestrator,
     allocate_volume_by_surface,
     midnight_transfer,
+)
+from custom_components.my_garden_irrigation.core.strategies import (
+    InclusiveEveningStrategy,
+    StandardMorningStrategy,
+    WateringStrategyFactory,
 )
 
 
@@ -190,6 +201,66 @@ def test_evening_strategy_includes_daily_need():
 def test_evening_strategy_zero_cumulative():
     s = InclusiveEveningStrategy()
     assert s.calculate_target_volume(0.0, 4.0) == pytest.approx(4.0)
+
+
+# ---------------------------------------------------------------------------
+# ADR-024 — WateringStrategyFactory
+# ---------------------------------------------------------------------------
+
+def test_factory_morning_below_threshold():
+    s = WateringStrategyFactory.from_irrigation_time("06:00:00")
+    assert isinstance(s, StandardMorningStrategy)
+
+def test_factory_evening_at_threshold():
+    s = WateringStrategyFactory.from_irrigation_time("12:00:00")
+    assert isinstance(s, InclusiveEveningStrategy)
+
+def test_factory_evening_above_threshold():
+    s = WateringStrategyFactory.from_irrigation_time("21:30:00")
+    assert isinstance(s, InclusiveEveningStrategy)
+
+def test_factory_invalid_time_defaults_to_morning():
+    s = WateringStrategyFactory.from_irrigation_time("invalid")
+    assert isinstance(s, StandardMorningStrategy)
+
+def test_factory_empty_string_defaults_to_morning():
+    s = WateringStrategyFactory.from_irrigation_time("")
+    assert isinstance(s, StandardMorningStrategy)
+
+
+# ---------------------------------------------------------------------------
+# ADR-023 — MidnightClosureOrchestrator
+# ---------------------------------------------------------------------------
+
+def test_orchestrator_accumulates():
+    orch = MidnightClosureOrchestrator()
+    result = orch.execute({"c1": 10.0}, {"c1": 3.0})
+    assert result["c1"] == pytest.approx(13.0)
+
+def test_orchestrator_deducts_watering():
+    """Étape 2 — Règle 1 : équilibrage avec déduction arrosage."""
+    orch = MidnightClosureOrchestrator()
+    result = orch.execute({"c1": 0.0}, {"c1": 4.0}, {"c1": 8.0})
+    assert result["c1"] == pytest.approx(0.0)
+
+def test_orchestrator_no_negative():
+    orch = MidnightClosureOrchestrator()
+    result = orch.execute({"c1": 2.0}, {"c1": 1.0}, {"c1": 50.0})
+    assert result["c1"] == pytest.approx(0.0)
+
+def test_orchestrator_does_not_mutate():
+    cumulative = {"c1": 5.0}
+    daily = {"c1": 2.0}
+    orig_c, orig_d = dict(cumulative), dict(daily)
+    MidnightClosureOrchestrator().execute(cumulative, daily)
+    assert cumulative == orig_c
+    assert daily == orig_d
+
+def test_orchestrator_empty_watering_equivalent_to_none():
+    orch = MidnightClosureOrchestrator()
+    r1 = orch.execute({"c1": 5.0}, {"c1": 2.0}, {})
+    r2 = orch.execute({"c1": 5.0}, {"c1": 2.0}, None)
+    assert r1 == r2
 
 
 # ---------------------------------------------------------------------------

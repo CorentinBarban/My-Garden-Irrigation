@@ -343,6 +343,19 @@ class RuntimeConfigState:
         )
         self._watering_applied_today = {}
 
+    def apply_midnight_result(self, new_cumulative: dict[str, float]) -> None:
+        """Applique le résultat calculé par MidnightClosureOrchestrator (ADR-023).
+
+        Reçoit le nouveau bilan pré-calculé (pur Python, sans effet de bord)
+        et remet le suivi du jour à zéro atomiquement.
+        """
+        self._cumulative_need = new_cumulative
+        _LOGGER.debug(
+            "RuntimeConfigState : accumulation minuit (orchestrateur) — bilan cumulé : %s",
+            {k: round(v, 1) for k, v in self._cumulative_need.items()},
+        )
+        self._watering_applied_today = {}
+
     def reset_irrigation(self) -> None:
         """Remet le bilan hydrique cumulé et les arrosages du jour à zéro."""
         self._cumulative_need = {}
