@@ -20,6 +20,7 @@ Bugs couverts :
 import asyncio
 import logging
 import pytest
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.my_garden_irrigation.config_state import RuntimeConfigState
@@ -1458,3 +1459,130 @@ def test_on_trigger_no_calendar_skip_on_technical_failure():
     assert dates_saved == [], (
         "Erreur technique (data=None) : la date ne doit pas être avancée"
     )
+
+
+# ---------------------------------------------------------------------------
+# Bug fréquence — scheduler : next_trigger doit refléter le vrai prochain arrosage
+# ---------------------------------------------------------------------------
+
+def test_compute_next_trigger_interval_uses_last_date():
+    """En mode interval, next_trigger = last_date + interval_days à l'heure configurée."""
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    config = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: 3}
+    )
+    config._last_auto_watering_date = "2026-06-01"
+
+    hass = MagicMock()
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
+
+    now = datetime(2026, 6, 2, 10, 0, 0, tzinfo=timezone.utc)
+    result = scheduler._compute_next_trigger(now, 6, 0)
+
+    assert result.date() == date(2026, 6, 4), (
+        "Avec last_date=2026-06-01 et interval=3j, next_trigger doit être 2026-06-04"
+    )
+    assert result.hour == 6 and result.minute == 0
+
+
+def test_compute_next_trigger_interval_past_falls_back_to_tomorrow():
+    """Si last_date + interval est déjà passé, next_trigger = demain à l'heure configurée."""
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    config = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: 1}
+    )
+    config._last_auto_watering_date = "2026-05-01"  # très ancien
+
+    hass = MagicMock()
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
+
+    now = datetime(2026, 6, 2, 10, 0, 0, tzinfo=timezone.utc)
+    result = scheduler._compute_next_trigger(now, 6, 0)
+
+    assert result.date() == date(2026, 6, 3), (
+        "Quand la date calculée est dans le passé, next_trigger doit être demain"
+    )
+
+
+def test_compute_next_trigger_interval_no_last_date_falls_back():
+    """Sans last_date, le mode interval retombe sur le prochain créneau horaire (demain)."""
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    config = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: 3}
+    )
+    # pas de last_auto_watering_date
+
+    hass = MagicMock()
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
+
+    now = datetime(2026, 6, 2, 10, 0, 0, tzinfo=timezone.utc)
+    result = scheduler._compute_next_trigger(now, 6, 0)
+
+    assert result.date() == date(2026, 6, 3)
+
+
+def test_compute_next_trigger_daily_mode_is_tomorrow():
+    """En mode daily, next_trigger est toujours demain si l'heure est passée."""
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+
+    config = _make_state()  # frequency=daily par défaut
+
+    hass = MagicMock()
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
+
+    now = datetime(2026, 6, 2, 10, 0, 0, tzinfo=timezone.utc)
+    result = scheduler._compute_next_trigger(now, 6, 0)
+
+    assert result.date() == date(2026, 6, 3)
+
+
+def test_set_watering_frequency_calls_reschedule():
+    """set_watering_frequency() doit appeler reschedule_auto_irrigation() sur le scheduler."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    class FakeCoord:
+        config = _make_state()
+        _scheduler = MagicMock()
+        _reschedule_called = False
+
+        def _schedule_config_save(self):
+            pass
+
+        def _notify_listeners(self):
+            pass
+
+    coord = FakeCoord()
+    IrrigationCoordinator.set_watering_frequency(coord, WATERING_FREQUENCY_INTERVAL)
+
+    coord._scheduler.reschedule_auto_irrigation.assert_called_once()
+
+
+def test_set_watering_interval_days_calls_reschedule():
+    """set_watering_interval_days() doit appeler reschedule_auto_irrigation() sur le scheduler."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        config = _make_state()
+        _scheduler = MagicMock()
+
+        def _schedule_config_save(self):
+            pass
+
+        def _notify_listeners(self):
+            pass
+
+    coord = FakeCoord()
+    IrrigationCoordinator.set_watering_interval_days(coord, 4)
+
+    coord._scheduler.reschedule_auto_irrigation.assert_called_once()

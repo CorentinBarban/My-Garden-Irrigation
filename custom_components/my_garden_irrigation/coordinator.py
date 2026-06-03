@@ -233,11 +233,15 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
     def set_watering_interval_days(self, value: int) -> None:
         self.config.set_watering_interval_days(value)
+        if self._scheduler is not None:
+            self._scheduler.reschedule_auto_irrigation()
         self._schedule_config_save()
         self._notify_listeners()
 
     def set_watering_frequency(self, value: str) -> None:
         self.config.set_watering_frequency(value)
+        if self._scheduler is not None:
+            self._scheduler.reschedule_auto_irrigation()
         self._schedule_config_save()
         self._notify_listeners()
 

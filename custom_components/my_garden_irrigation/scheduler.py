@@ -76,15 +76,38 @@ class IrrigationScheduler:
             hour, minute = 6, 0
 
         now = dt_util.now()
-        next_trigger = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if next_trigger <= now:
-            next_trigger += timedelta(days=1)
+        next_trigger = self._compute_next_trigger(now, hour, minute)
 
         self.next_trigger = next_trigger
         self._auto_unsub = async_track_point_in_time(
             self._hass, self._handle_auto_irrigation, next_trigger
         )
         _LOGGER.debug("Arrosage automatique planifié à %s", next_trigger)
+
+    def _compute_next_trigger(self, now: datetime, hour: int, minute: int) -> datetime:
+        """Calcule la prochaine date de déclenchement selon le mode de fréquence."""
+        if self._config.watering_frequency == WATERING_FREQUENCY_INTERVAL:
+            last_date_str = self._config.last_auto_watering_date
+            if last_date_str:
+                interval_days = self._config.watering_interval_days
+                last_date = date.fromisoformat(last_date_str)
+                next_date = last_date + timedelta(days=interval_days)
+                next_trigger = now.replace(
+                    year=next_date.year,
+                    month=next_date.month,
+                    day=next_date.day,
+                    hour=hour,
+                    minute=minute,
+                    second=0,
+                    microsecond=0,
+                )
+                if next_trigger > now:
+                    return next_trigger
+        # Mode daily ou pas de date de référence : prochain créneau horaire
+        next_trigger = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if next_trigger <= now:
+            next_trigger += timedelta(days=1)
+        return next_trigger
 
     # ------------------------------------------------------------------
     # Handlers
