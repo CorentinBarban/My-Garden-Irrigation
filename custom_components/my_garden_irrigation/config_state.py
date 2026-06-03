@@ -321,9 +321,24 @@ class RuntimeConfigState:
 
     def apply_midnight_transfer(self, daily_needs: dict[str, float]) -> None:
         """Accumule les besoins journaliers au cumulé, remet le suivi du jour à zéro."""
-        self._cumulative_need = midnight_transfer(self._cumulative_need, daily_needs)
+        self._cumulative_need = midnight_transfer(
+            self._cumulative_need, daily_needs, self._watering_applied_today
+        )
         _LOGGER.debug(
             "RuntimeConfigState : accumulation minuit — bilan cumulé : %s",
+            {k: round(v, 1) for k, v in self._cumulative_need.items()},
+        )
+        self._watering_applied_today = {}
+
+    def apply_midnight_transfer_from_balance(self, daily_balance: dict[str, float]) -> None:
+        """Clôture de minuit depuis le replay du journal de transactions (ADR-026).
+
+        daily_balance est déjà net (besoin - arrosage, ≥ 0) : ne pas déduire
+        _watering_applied_today une seconde fois.
+        """
+        self._cumulative_need = midnight_transfer(self._cumulative_need, daily_balance, {})
+        _LOGGER.debug(
+            "RuntimeConfigState : accumulation minuit (ledger) — bilan cumulé : %s",
             {k: round(v, 1) for k, v in self._cumulative_need.items()},
         )
         self._watering_applied_today = {}
