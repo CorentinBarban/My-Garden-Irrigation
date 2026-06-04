@@ -1510,8 +1510,13 @@ def test_compute_next_trigger_interval_past_falls_back_to_tomorrow():
     )
 
 
-def test_compute_next_trigger_interval_no_last_date_falls_back():
-    """Sans last_date, le mode interval retombe sur le prochain créneau horaire (demain)."""
+def test_compute_next_trigger_interval_no_last_date_anchors_on_today():
+    """Sans last_date, le mode interval s'ancre sur aujourd'hui : next = today + intervalle.
+
+    Sans cet ancrage, le mode interval retombait sur le comportement « daily »
+    (demain) tant qu'aucun arrosage automatique n'avait eu lieu, et changer
+    l'intervalle ou la fréquence n'impactait pas la date du prochain arrosage.
+    """
     from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
     from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
 
@@ -1527,7 +1532,8 @@ def test_compute_next_trigger_interval_no_last_date_falls_back():
     now = datetime(2026, 6, 2, 10, 0, 0, tzinfo=timezone.utc)
     result = scheduler._compute_next_trigger(now, 6, 0)
 
-    assert result.date() == date(2026, 6, 3)
+    # today (02/06) + 3 jours = 05/06, et non 03/06 (demain).
+    assert result.date() == date(2026, 6, 5)
 
 
 def test_compute_next_trigger_daily_mode_is_tomorrow():

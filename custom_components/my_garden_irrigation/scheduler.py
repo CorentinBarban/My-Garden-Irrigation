@@ -87,23 +87,27 @@ class IrrigationScheduler:
     def _compute_next_trigger(self, now: datetime, hour: int, minute: int) -> datetime:
         """Calcule la prochaine date de déclenchement selon le mode de fréquence."""
         if self._config.watering_frequency == WATERING_FREQUENCY_INTERVAL:
+            interval_days = self._config.watering_interval_days
             last_date_str = self._config.last_auto_watering_date
-            if last_date_str:
-                interval_days = self._config.watering_interval_days
-                last_date = date.fromisoformat(last_date_str)
-                next_date = last_date + timedelta(days=interval_days)
-                next_trigger = now.replace(
-                    year=next_date.year,
-                    month=next_date.month,
-                    day=next_date.day,
-                    hour=hour,
-                    minute=minute,
-                    second=0,
-                    microsecond=0,
-                )
-                if next_trigger > now:
-                    return next_trigger
-        # Mode daily ou pas de date de référence : prochain créneau horaire
+            # Ancrage : dernière date d'arrosage auto, ou aujourd'hui si aucun
+            # arrosage automatique n'a encore eu lieu. Sans cet ancrage par défaut,
+            # le mode interval retombait sur le comportement « daily » tant que
+            # last_auto_watering_date était vide, et le changement d'intervalle ou
+            # de fréquence n'impactait pas la date du prochain arrosage.
+            anchor = date.fromisoformat(last_date_str) if last_date_str else now.date()
+            next_date = anchor + timedelta(days=interval_days)
+            next_trigger = now.replace(
+                year=next_date.year,
+                month=next_date.month,
+                day=next_date.day,
+                hour=hour,
+                minute=minute,
+                second=0,
+                microsecond=0,
+            )
+            if next_trigger > now:
+                return next_trigger
+        # Mode daily ou intervalle déjà dépassé (retard) : prochain créneau horaire
         next_trigger = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if next_trigger <= now:
             next_trigger += timedelta(days=1)
