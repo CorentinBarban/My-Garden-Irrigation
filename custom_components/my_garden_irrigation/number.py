@@ -1,9 +1,8 @@
 """Plateforme number — My Garden Irrigation.
 
-Toutes les entités lisent leur valeur depuis le coordinateur, source unique
-de vérité. Les champs par culture (nb_plants, densité) sont persistés dans le
-Store HA via PersistenceManager et restaurés au boot avant la création des
-entités — plus aucune dépendance à RestoreEntity (persistance dédoublée).
+Les entités lisent et écrivent leur valeur via le coordinateur, source unique de
+vérité. Les champs par culture (nb_plants, densité) sont persistés dans le Store HA
+et restaurés au boot avant la création des entités.
 """
 from __future__ import annotations
 
@@ -49,8 +48,7 @@ async def async_setup_entry(
 
 
 # ---------------------------------------------------------------------------
-# Entités par culture — vues fines sur le coordinateur. Les valeurs sont
-# persistées dans le Store HA et restaurées au boot (plus de RestoreEntity).
+# Entités par culture — vues fines sur le coordinateur, persistées dans le Store HA.
 # ---------------------------------------------------------------------------
 
 class NbPlantsNumber(NumberEntity):
@@ -116,9 +114,7 @@ class DensityNumber(NumberEntity):
 
 
 # ---------------------------------------------------------------------------
-# Entités de configuration globale — lisent depuis le coordinateur
-# (lui-même initialisé depuis entry.options). Pas de RestoreEntity :
-# après un rechargement via le formulaire, entry.options fait autorité.
+# Entités de configuration globale — lisent depuis le coordinateur.
 # ---------------------------------------------------------------------------
 
 class GlobalFlowRateNumber(NumberEntity):

@@ -24,12 +24,12 @@ class WaterTransaction:
 
 
 class DailyWaterLedger:
-    """Accumule les transactions hydriques du jour et permet leur replay.
+    """Accumule les transactions hydriques du jour et calcule leur solde net.
 
     Chaque rafraîchissement météo enregistre une transaction ETO (+).
     Chaque fermeture de vanne enregistre une transaction IRRIGATION (−).
-    À minuit, replay() remplace daily_needs + watering_applied_today.
-    Au redémarrage, from_storage() restaure l'état intra-journée.
+    À minuit, replay() fournit le solde net du jour ; from_storage() restaure
+    l'état intra-journée au redémarrage.
     """
 
     def __init__(self) -> None:
@@ -41,10 +41,8 @@ class DailyWaterLedger:
     def set_daily_need(self, crop_id: str, need: float, recorded_at: datetime) -> None:
         """Enregistre (ou remplace) l'apport ETo journalier d'une culture.
 
-        Idempotent par culture : un seul apport ETo est conservé par jour, quel
-        que soit le nombre de rafraîchissements météo. Le besoin journalier
-        complet ne doit être compté qu'une fois au replay de minuit — sans cette
-        déduplication, un refresh horaire l'additionnerait ~24 fois.
+        Idempotent par culture : une seule transaction ETO est conservée par jour,
+        quel que soit le nombre de rafraîchissements météo horaires.
         """
         self._transactions = [
             tx
@@ -65,8 +63,8 @@ class DailyWaterLedger:
     def applied_volumes(self) -> dict[str, float]:
         """Volumes arrosés aujourd'hui par culture (litres positifs).
 
-        Dérivé des transactions IRRIGATION (volume négatif) — source unique du
-        suivi intra-journée, en remplacement du dict watering_applied_today.
+        Somme des transactions IRRIGATION (dont le volume est négatif), ramenée en
+        valeurs positives.
         """
         applied: dict[str, float] = {}
         for tx in self._transactions:

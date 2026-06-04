@@ -95,9 +95,10 @@ class MyGardenIrrigationConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
-    """Options Flow — hérite de OptionsFlowWithReload pour le rechargement automatique.
+    """Options Flow — recharge automatiquement l'entrée après chaque modification.
 
-    Supprime le boilerplate manuel du listener de rechargement (Module 4).
+    Hérite de OptionsFlowWithReload : le rechargement de la config entry est
+    déclenché par le framework HA à l'enregistrement, sans listener manuel.
     """
 
     def __init__(self, entry: ConfigEntry) -> None:
@@ -118,8 +119,8 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
     async def async_step_init(
         self, user_input: dict | None = None  # noqa: ARG002
     ) -> ConfigFlowResult:
-        # Synchronise les valeurs depuis le coordinator live (si disponible) pour que
-        # le formulaire reflète les changements effectués via les entités HA.
+        # Recharge les valeurs depuis le coordinator live (si présent) : le formulaire
+        # affiche les valeurs courantes, y compris celles modifiées via les entités HA.
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         if coordinator is not None:
             cfg = coordinator.config
@@ -145,7 +146,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
         )
 
     # ------------------------------------------------------------------
-    # Ajouter une culture (Module 4 : validation Voluptuous renforcée)
+    # Ajouter une culture
     # ------------------------------------------------------------------
 
     async def async_step_add_crop(
@@ -154,14 +155,14 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Validation backend : interdit les noms vides ou contenant uniquement des espaces
+            # Rejette un nom vide ou composé uniquement d'espaces.
             crop_name_raw = user_input.get(CONF_CROP_NAME, "")
             try:
                 vol.Schema(vol.All(str, vol.Strip, vol.Length(min=1)))(crop_name_raw)
             except vol.Invalid:
                 errors[CONF_CROP_NAME] = "invalid_crop_name"
 
-            # Validation backend : densité > 0 (division par zéro dans compute_surface_m2 sinon)
+            # Exige une densité > 0 : compute_surface_m2 divise par la densité.
             density_raw = float(user_input.get(CONF_DENSITY, 0))
             if density_raw <= 0:
                 errors[CONF_DENSITY] = "invalid_density"
@@ -218,7 +219,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
         )
 
     # ------------------------------------------------------------------
-    # Supprimer une culture (Module 4 : i18n — pas de f-string dans le label)
+    # Supprimer une culture
     # ------------------------------------------------------------------
 
     async def async_step_remove_crop(
@@ -234,8 +235,8 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
             ]
             return self._save()
 
-        # Module 4 : label = crop_name uniquement (pas de f-string composite).
-        # Le placeholder {crops_count} est déclaré dans strings.json.
+        # Le label affiché est le seul nom de culture ; le nombre de cultures est
+        # passé via le placeholder {crops_count} (traduit dans strings.json).
         crop_options = [
             {
                 "value": c[CONF_CROP_ID],
@@ -291,7 +292,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
         )
 
     # ------------------------------------------------------------------
-    # Fréquence, mode et paramètres fractionné (Modules 4 + 5)
+    # Fréquence et mode d'arrosage
     # ------------------------------------------------------------------
 
     async def async_step_watering_config(
@@ -304,7 +305,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
             if interval is not None:
                 self._watering_interval_days = int(interval)
 
-            # Module 5 : si mode fractionné → étape dédiée, sinon sauvegarde directe
+            # Mode fractionné → étape dédiée cycles/soak ; sinon enregistrement direct.
             if self._watering_mode == WATERING_MODE_FRACTIONED:
                 return await self.async_step_fractioned_config()
             return self._save()
@@ -341,7 +342,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
         )
 
     # ------------------------------------------------------------------
-    # Module 5 — Paramètres du mode fractionné (étape conditionnelle)
+    # Paramètres du mode fractionné (cycles et soak)
     # ------------------------------------------------------------------
 
     async def async_step_fractioned_config(

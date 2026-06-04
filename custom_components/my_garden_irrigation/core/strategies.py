@@ -38,11 +38,7 @@ class InclusiveEveningStrategy:
 
 
 class WateringStrategyFactory:
-    """Sélectionne la stratégie de volume adaptée à l'heure d'arrosage (ADR-024).
-
-    Centralise la logique de sélection hors du coordinator — extensible
-    sans modifier fire_irrigation_event (principe Open/Closed).
-    """
+    """Sélectionne la stratégie de volume adaptée à l'heure d'arrosage (ADR-024)."""
 
     @staticmethod
     def from_irrigation_time(irrigation_time: str) -> WateringVolumeStrategy:

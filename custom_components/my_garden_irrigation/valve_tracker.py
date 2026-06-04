@@ -37,15 +37,14 @@ class ValveTracker:
         self._config = config
         self._on_volumes_applied = on_volumes_applied
         self._accumulated_session_volumes: dict[str, float] = {}
-        # Dernier état binaire connu (True = ouverte). Permet de survivre aux
-        # états intermédiaires unavailable/unknown sans rater une fermeture.
+        # Dernier état binaire connu (True = ouverte) ; sert de référence pour
+        # ignorer les états intermédiaires unavailable/unknown.
         self._was_open: bool = False
 
     async def setup(self) -> Callable:
-        """Inscrit le listener et restaure l'état de la vanne (awaitable).
+        """Restaure l'état de la vanne puis inscrit le listener de changement d'état.
 
-        Attendre cette coroutine garantit que la restauration est terminée
-        avant async_config_entry_first_refresh — élimine la race condition.
+        La restauration est awaited avant le premier refresh du coordinator.
 
         Returns:
             Callable de nettoyage à passer à entry.async_on_unload().
@@ -106,12 +105,10 @@ class ValveTracker:
 
     @callback
     def _handle_valve_state_change(self, event: Event) -> None:
-        """Détecte l'ouverture/fermeture et délègue.
+        """Enregistre l'heure d'ouverture et déclenche la comptabilisation à la fermeture.
 
-        Utilise _was_open (dernier état binaire connu) plutôt qu'une comparaison
-        old→new stricte. Cela permet de traverser les états intermédiaires
-        unavailable/unknown (fréquents sur Z-Wave/Zigbee) sans rater une
-        fermeture ni injecter de volume fantôme.
+        Compare le nouvel état à _was_open (dernier état binaire connu) : les états
+        intermédiaires unavailable/unknown sont ignorés sans déclencher de fermeture.
         """
         old_state = event.data.get("old_state")
         new_state = event.data.get("new_state")

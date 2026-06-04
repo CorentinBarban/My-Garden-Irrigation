@@ -60,13 +60,12 @@ class IrrigationScheduler:
         return _cleanup
 
     def reschedule_auto_irrigation(self, reanchor: bool = False) -> None:
-        """Annule et replanifie l'arrosage automatique (appelé quand la config change).
+        """Annule le déclenchement planifié et en recalcule un nouveau.
 
-        reanchor=True : changement explicite d'intervalle/fréquence par l'utilisateur.
-        Le prochain arrosage est recalé sur N jours pleins depuis maintenant pour que
-        le compte à rebours affiché corresponde à l'intervalle choisi.
-        reanchor=False (défaut) : setup, redémarrage, post-arrosage — on conserve le
-        cycle stable ancré sur la dernière date d'arrosage, sans dérive.
+        reanchor=True : recale le prochain arrosage sur N jours pleins à partir de
+        maintenant (utilisé quand l'utilisateur change l'intervalle ou la fréquence).
+        reanchor=False : conserve le cycle ancré sur la dernière date d'arrosage
+        (setup, redémarrage, post-arrosage).
         """
         if self._auto_unsub is not None:
             self._auto_unsub()
@@ -103,11 +102,9 @@ class IrrigationScheduler:
             interval_days = self._config.watering_interval_days
 
             if reanchor:
-                # Ré-ancrage explicite : viser N jours PLEINS depuis maintenant.
-                # L'arrosage étant figé à l'heure du créneau (ex. 06:00), on décale
-                # d'un jour si ce créneau est déjà passé aujourd'hui, afin que le
-                # compte à rebours affiché (temps relatif Home Assistant) corresponde
-                # bien à l'intervalle choisi quelle que soit l'heure de configuration.
+                # Vise N jours pleins après maintenant, à l'heure du créneau. Si le
+                # créneau du jour cible est déjà passé, décale d'un jour pour que la
+                # durée restante affichée corresponde à l'intervalle choisi.
                 target = now + timedelta(days=interval_days)
                 next_trigger = target.replace(
                     hour=hour, minute=minute, second=0, microsecond=0
@@ -116,10 +113,8 @@ class IrrigationScheduler:
                     next_trigger += timedelta(days=1)
                 return next_trigger
 
-            # Date cible persistée lors d'un ré-ancrage explicite : elle prime tant
-            # qu'elle est dans le futur, pour que le « dans N jours » survive aux
-            # redémarrages. L'heure suit le créneau courant (changement d'heure
-            # d'arrosage pris en compte sans déplacer la date).
+            # Date cible persistée par un ré-ancrage antérieur : prioritaire tant
+            # qu'elle est future, à l'heure du créneau courant. Survit aux redémarrages.
             override = self._config.next_watering_override
             if override:
                 override_dt = datetime.fromisoformat(override).replace(
@@ -128,9 +123,8 @@ class IrrigationScheduler:
                 if override_dt > now:
                     return override_dt
 
-            # Cycle stable : ancrage sur la dernière date d'arrosage auto (ou
-            # aujourd'hui si aucun arrosage n'a encore eu lieu). Garantit un
-            # intervalle régulier et évite toute dérive au redémarrage.
+            # Ancrage sur la dernière date d'arrosage (ou aujourd'hui à défaut) +
+            # interval_days, à l'heure du créneau.
             last_date_str = self._config.last_auto_watering_date
             anchor = date.fromisoformat(last_date_str) if last_date_str else now.date()
             next_date = anchor + timedelta(days=interval_days)
@@ -145,7 +139,7 @@ class IrrigationScheduler:
             )
             if next_trigger > now:
                 return next_trigger
-        # Mode daily ou intervalle déjà dépassé (retard) : prochain créneau horaire
+        # Mode daily, ou date d'intervalle déjà passée : prochain créneau horaire.
         next_trigger = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if next_trigger <= now:
             next_trigger += timedelta(days=1)

@@ -119,9 +119,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         if self.data is not None:
             daily_needs = {cid: r.daily_need_liters for cid, r in self.data.crops.items()}
             new_crops_added = self.config.init_missing_crops(daily_needs)
-            # Toujours sauvegarder pour maintenir l'options_hash cohérent avec
-            # entry.options courant (évite l'invalidation des overrides entity
-            # lors d'un rechargement déclenché par l'OptionsFlow).
+            # Sauvegarde systématique : aligne l'options_hash persisté sur
+            # entry.options courant pour préserver les overrides entity au rechargement.
             await self._async_save()
             if new_crops_added:
                 await self._async_recompute_from_cache()
@@ -161,11 +160,10 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         await self._on_interval_reached_agronomic()          # Règle 2+physique — conditionnel
 
     async def _on_interval_reached_calendar(self, date_iso: str) -> None:
-        """Met à jour la date dès que l'intervalle est atteint (Règle 3).
+        """Avance la date du dernier arrosage quand l'intervalle est atteint (Règle 3).
 
-        Condition : données météo disponibles. Sans elles, on ne sait pas si le
-        besoin est nul (pluie) ou simplement inconnu — ne pas avancer le calendrier
-        permet de réessayer demain plutôt que de créer un saut involontaire.
+        N'avance la date que si les données météo sont disponibles ; sinon le
+        calendrier reste en place pour réessayer le lendemain.
         """
         if self.data is None:
             _LOGGER.warning(
@@ -514,13 +512,10 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         return storage
 
     async def _async_save(self) -> None:
-        """Point d'entrée unique de la persistance : immédiat et résilient.
+        """Sérialise et persiste l'état courant ; journalise toute erreur sans la propager.
 
-        Centralise _build_storage() et la gestion d'erreur. Les actions async
-        (arrosage, minuit, reset…) l'appellent directement ; les setters
-        synchrones passent par _schedule_config_save() (debounce) qui délègue ici.
-        Une erreur de Store est journalisée sans interrompre l'appelant : l'état
-        en mémoire reste à jour et sera persisté au prochain enregistrement.
+        Point d'entrée unique de la persistance. Les actions async l'appellent
+        directement ; les setters synchrones passent par _schedule_config_save (debounce).
         """
         try:
             await self._persistence.async_save(self._build_storage())
@@ -529,12 +524,10 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
     @callback
     def _notify_listeners(self) -> None:
-        """Notifie les entités d'un changement de config sans appel météo.
+        """Rafraîchit les entités après un changement de config, sans appel météo.
 
-        Utilisé par les setters synchrones (set_flow_rate, set_watering_mode…)
-        pour que les capteurs dépendants (durée recommandée, mode affiché)
-        se rafraîchissent immédiatement — sans attendre le polling horaire.
-        N'annule pas le timer de polling contrairement à async_set_updated_data.
+        Appelé par les setters synchrones. Contrairement à async_set_updated_data,
+        ne réinitialise pas le timer de polling horaire.
         """
         if self.data is not None:
             self.async_update_listeners()

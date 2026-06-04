@@ -1,9 +1,7 @@
 """Plateforme select — My Garden Irrigation.
 
-Toutes les entités lisent depuis le coordinateur, source unique de vérité.
-Le stade par culture (StageSelect) est persisté dans le Store HA via
-PersistenceManager et restauré au boot — plus de RestoreEntity. Après un
-rechargement via le formulaire, c'est entry.options qui fait autorité.
+Les entités lisent et écrivent via le coordinateur, source unique de vérité.
+Le stade par culture (StageSelect) est persisté dans le Store HA et restauré au boot.
 """
 from __future__ import annotations
 

@@ -1,10 +1,8 @@
 """État de configuration mutable — My Garden Irrigation.
 
-Classe Python pure (aucun import homeassistant.* à l'exécution).
-Contient l'intégralité de l'état runtime qui était dispersé dans coordinator.py :
-config globale, bilan hydrique ADR-008, état vanne, arrosage automatique.
-
-100 % testable avec pytest sans Home Assistant.
+Classe Python pure (aucun import homeassistant.* à l'exécution), testable avec
+pytest sans Home Assistant. Porte l'état runtime : config globale, bilan hydrique
+cumulé (ADR-008), état de la vanne et de l'arrosage automatique.
 """
 from __future__ import annotations
 
@@ -65,13 +63,11 @@ def _crops_snapshot(options: dict) -> dict:
 
 
 def _options_hash(options: dict) -> str:
-    """Hash stable des clés de config (globale + cultures du formulaire).
+    """Hash stable des clés de config (globale + valeurs par culture du formulaire).
 
-    Détecte si entry.options a changé depuis le dernier save runtime
-    (i.e. l'utilisateur a soumis le formulaire entre-temps). Inclut les
-    valeurs par culture du formulaire : ainsi une re-soumission qui modifie
-    une culture invalide les overrides entity obsolètes (le formulaire fait
-    autorité). Si le hash diffère, les overrides entity sont ignorés.
+    Sert à détecter une re-soumission du formulaire entre deux sauvegardes runtime :
+    si le hash stocké diffère du hash courant, les overrides persistés (globaux et
+    par culture) sont ignorés et entry.options fait autorité.
     """
     relevant = {k: options.get(k) for k in _RUNTIME_CONFIG_KEYS}
     relevant["crops"] = _crops_snapshot(options)
@@ -91,10 +87,10 @@ class RuntimeConfigState:
     def __init__(self, options: dict) -> None:
         self._options = options
 
-        # Config depuis entry.options (vérités initiales, remplacées par les
-        # overrides runtime si l'options_hash est cohérent au chargement).
-        # Copie profonde des cultures : les mutations UI (update_crop_field) ne
-        # doivent pas altérer entry.options, qui sert de snapshot stable au hash.
+        # Valeurs initiales lues depuis entry.options ; remplacées au chargement par
+        # les overrides runtime si l'options_hash concorde.
+        # Les cultures sont copiées : update_crop_field ne doit pas muter entry.options,
+        # qui sert de snapshot stable pour le hash.
         self._crop_data: list[dict] = [
             dict(crop) for crop in options.get(CONF_CROPS, [])
         ]
@@ -114,8 +110,8 @@ class RuntimeConfigState:
             options.get(CONF_SOAK_DURATION, DEFAULT_SOAK_DURATION_MINUTES)
         )
 
-        # Bilan hydrique (ADR-008). Le suivi des arrosages du jour n'est plus
-        # stocké ici : il est dérivé du journal de transactions (ADR-026).
+        # Bilan hydrique cumulé par culture (ADR-008). Le suivi des arrosages du
+        # jour est dérivé du journal de transactions (DailyWaterLedger, ADR-026).
         self._cumulative_need: dict[str, float] = {}
 
         # État arrosage automatique
@@ -144,9 +140,8 @@ class RuntimeConfigState:
     def restore_from_storage(self, stored: dict, now_date_iso: str) -> None:
         """Restaure l'état depuis le Store HA.
 
-        La réconciliation options_hash garantit que si l'utilisateur a soumis
-        le formulaire depuis le dernier save, les overrides entity sont ignorés
-        et les valeurs du formulaire restent autoritaires.
+        Les overrides runtime ne sont réappliqués que si l'options_hash stocké
+        concorde avec celui d'entry.options ; sinon le formulaire fait autorité.
         """
         if not stored:
             return
@@ -176,9 +171,8 @@ class RuntimeConfigState:
                 self._cycles_count = int(runtime[CONF_CYCLES_COUNT])
             if CONF_SOAK_DURATION in runtime:
                 self._soak_duration_minutes = int(runtime[CONF_SOAK_DURATION])
-            # Overrides par culture (nb_plants/densité/stade pilotés via l'UI).
-            # Même garde options_hash : si le formulaire a été re-soumis, ces
-            # overrides sont obsolètes et entry.options fait autorité.
+            # Overrides par culture (nb_plants/densité/stade pilotés via l'UI),
+            # soumis à la même garde options_hash que la config globale.
             self._restore_crop_overrides(stored.get("crop_overrides", {}))
             _LOGGER.debug("RuntimeConfigState : runtime config restauré depuis le Store.")
 
@@ -348,11 +342,10 @@ class RuntimeConfigState:
         self._next_watering_override = value
 
     def scale_cumulative_need(self, crop_id: str, scale: float) -> None:
-        """Rescale proportionnellement le besoin cumulé d'une culture.
+        """Multiplie le besoin cumulé d'une culture par un facteur d'échelle.
 
-        Appelé lors d'un changement de surface (nb_plants ou densité) pour
-        maintenir la cohérence du bilan hydrique. Encapsule l'accès à
-        _cumulative_need — seule RuntimeConfigState doit le modifier directement.
+        Appelé quand la surface change (nb_plants ou densité) pour garder le bilan
+        cohérent avec la nouvelle surface.
         """
         if crop_id in self._cumulative_need:
             self._cumulative_need[crop_id] = round(
@@ -364,24 +357,14 @@ class RuntimeConfigState:
     # ------------------------------------------------------------------
 
     def apply_watering_volumes(self, volumes: dict[str, float]) -> None:
-        """Réduit le déficit cumulé des volumes distribués par culture (plancher 0).
-
-        Le suivi des volumes arrosés du jour est dérivé du journal de
-        transactions (DailyWaterLedger.applied_volumes) — il n'est plus
-        dupliqué ici (ADR-026).
-        """
+        """Soustrait du bilan cumulé les volumes distribués par culture (plancher 0)."""
         for crop_id in self._get_crop_ids():
             current = self._cumulative_need.get(crop_id, 0.0)
             distributed = volumes.get(crop_id, 0.0)
             self._cumulative_need[crop_id] = max(0.0, current - distributed)
 
     def apply_midnight_result(self, new_cumulative: dict[str, float]) -> None:
-        """Applique le résultat calculé par MidnightClosureOrchestrator (ADR-023).
-
-        Reçoit le nouveau bilan pré-calculé (pur Python, sans effet de bord).
-        Le suivi du jour est porté par le journal de transactions, réinitialisé
-        séparément par le coordinator (ADR-026).
-        """
+        """Remplace le bilan cumulé par celui calculé à la clôture de minuit (ADR-023)."""
         self._cumulative_need = new_cumulative
         _LOGGER.debug(
             "RuntimeConfigState : accumulation minuit (orchestrateur) — bilan cumulé : %s",

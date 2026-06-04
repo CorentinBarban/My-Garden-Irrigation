@@ -1,8 +1,6 @@
 """Plateforme time — My Garden Irrigation.
 
-IrrigationTimeEntity lit depuis le coordinateur (initialisé depuis entry.options).
-Pas de RestoreEntity : après un rechargement via le formulaire, entry.options
-fait autorité sur le dernier état HA.
+IrrigationTimeEntity lit et écrit l'heure d'arrosage via le coordinateur.
 """
 from __future__ import annotations
 
