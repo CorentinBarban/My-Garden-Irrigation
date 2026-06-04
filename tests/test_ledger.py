@@ -120,64 +120,10 @@ def test_midnight_transfer_returns_new_dict():
     result = midnight_transfer(cumulative, daily)
     assert result is not cumulative
 
-
-# ---------------------------------------------------------------------------
-# midnight_transfer — avec déduction arrosage (Règle 1 spec)
-# ---------------------------------------------------------------------------
-
-def test_midnight_transfer_deducts_watering_exact():
-    """Scénario I spec : arrosage du matin soldant la dette + besoin journalier → 0."""
-    # Jour 3 : cumul déjà remis à 0 par apply_watering_volumes (8L distribués),
-    # besoin journalier du soleil = 4L, arrosage_du_jour = 8L
-    # max(0, 0 + 4 - 8) = 0
-    result = midnight_transfer({"c1": 0.0}, {"c1": 4.0}, {"c1": 8.0})
+def test_midnight_transfer_floors_negative_balance():
+    """Un solde du jour négatif (sur-arrosage) ne rend jamais le cumulé négatif."""
+    result = midnight_transfer({"c1": 1.0}, {"c1": -5.0})
     assert result["c1"] == pytest.approx(0.0)
-
-def test_midnight_transfer_deducts_watering_partial():
-    """Arrosage insuffisant : dette résiduelle correctement calculée."""
-    # max(0, 5 + 2 - 3) = 4
-    result = midnight_transfer({"c1": 5.0}, {"c1": 2.0}, {"c1": 3.0})
-    assert result["c1"] == pytest.approx(4.0)
-
-def test_midnight_transfer_no_negative_cumulative():
-    """Sur-arrosage : le résultat est clampé à 0, jamais négatif."""
-    result = midnight_transfer({"c1": 2.0}, {"c1": 1.0}, {"c1": 50.0})
-    assert result["c1"] == pytest.approx(0.0)
-
-def test_midnight_transfer_backward_compat_no_watering_arg():
-    """Sans troisième argument, comportement identique à l'ancienne version."""
-    result = midnight_transfer({"c1": 10.0}, {"c1": 3.0})
-    assert result["c1"] == pytest.approx(13.0)
-
-def test_midnight_transfer_watering_none():
-    """watering_applied_today=None équivaut à aucun arrosage."""
-    result = midnight_transfer({"c1": 10.0}, {"c1": 3.0}, None)
-    assert result["c1"] == pytest.approx(13.0)
-
-def test_midnight_transfer_multi_crop_mixed():
-    """Plusieurs cultures : chacune déduit son propre arrosage.
-
-    apply_watering_volumes() réduit cumulative avant minuit :
-    c1 arrosé 8L → cumul c1 déjà à 0 ; c2 non arrosé → cumul reste 4.
-    """
-    # cumul après apply_watering_volumes : c1 réduit à 0, c2 inchangé
-    cumulative = {"c1": 0.0, "c2": 4.0}
-    daily = {"c1": 4.0, "c2": 2.0}
-    watering = {"c1": 8.0, "c2": 0.0}
-    result = midnight_transfer(cumulative, daily, watering)
-    assert result["c1"] == pytest.approx(0.0)   # max(0, 0 + 4 - 8) = 0
-    assert result["c2"] == pytest.approx(6.0)   # max(0, 4 + 2 - 0) = 6
-
-def test_midnight_transfer_does_not_mutate_inputs_with_watering():
-    """Les dictionnaires d'entrée ne sont pas mutés."""
-    cumulative = {"c1": 5.0}
-    daily = {"c1": 2.0}
-    watering = {"c1": 3.0}
-    orig_c, orig_d, orig_w = dict(cumulative), dict(daily), dict(watering)
-    midnight_transfer(cumulative, daily, watering)
-    assert cumulative == orig_c
-    assert daily == orig_d
-    assert watering == orig_w
 
 
 # ---------------------------------------------------------------------------
@@ -237,15 +183,10 @@ def test_orchestrator_accumulates():
     result = orch.execute({"c1": 10.0}, {"c1": 3.0})
     assert result["c1"] == pytest.approx(13.0)
 
-def test_orchestrator_deducts_watering():
-    """Étape 2 — Règle 1 : équilibrage avec déduction arrosage."""
+def test_orchestrator_floors_negative_balance():
+    """Un solde du jour négatif est planché à 0 par l'orchestrateur."""
     orch = MidnightClosureOrchestrator()
-    result = orch.execute({"c1": 0.0}, {"c1": 4.0}, {"c1": 8.0})
-    assert result["c1"] == pytest.approx(0.0)
-
-def test_orchestrator_no_negative():
-    orch = MidnightClosureOrchestrator()
-    result = orch.execute({"c1": 2.0}, {"c1": 1.0}, {"c1": 50.0})
+    result = orch.execute({"c1": 1.0}, {"c1": -50.0})
     assert result["c1"] == pytest.approx(0.0)
 
 def test_orchestrator_does_not_mutate():
@@ -255,12 +196,6 @@ def test_orchestrator_does_not_mutate():
     MidnightClosureOrchestrator().execute(cumulative, daily)
     assert cumulative == orig_c
     assert daily == orig_d
-
-def test_orchestrator_empty_watering_equivalent_to_none():
-    orch = MidnightClosureOrchestrator()
-    r1 = orch.execute({"c1": 5.0}, {"c1": 2.0}, {})
-    r2 = orch.execute({"c1": 5.0}, {"c1": 2.0}, None)
-    assert r1 == r2
 
 
 # ---------------------------------------------------------------------------

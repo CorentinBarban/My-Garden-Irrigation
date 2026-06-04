@@ -46,6 +46,7 @@ from .const import (
 
 from .coordinator import IrrigationCoordinator
 from .core.models import CropResult, IrrigationData
+from .core.watering_plan import compute_watering_plan
 
 
 async def async_setup_entry(
@@ -307,25 +308,20 @@ class TotalCumulativeNeedSensor(CoordinatorEntity[IrrigationCoordinator], Sensor
         data: IrrigationData | None = self.coordinator.data
         if data is None:
             return {}
-        total_cumulative = sum(data.cumulative_need.values())
-        flow_rate = self.coordinator.config.flow_rate
-        if flow_rate <= 0 or total_cumulative <= 0:
-            return {
-                ATTR_RECOMMENDED_DURATION_MINUTES: 0,
-                ATTR_IS_FRACTIONED: self.coordinator.config.watering_mode == WATERING_MODE_FRACTIONED,
-                ATTR_CYCLES_COUNT: self.coordinator.config.cycles_count,
-                ATTR_DURATION_PER_CYCLE_MINUTES: 0,
-                ATTR_SOAK_DURATION_MINUTES: self.coordinator.config.soak_duration_minutes,
-            }
-        duration_minutes = round((total_cumulative / flow_rate) * 60, 1)
-        is_fractioned = self.coordinator.config.watering_mode == WATERING_MODE_FRACTIONED
-        cycles = self.coordinator.config.cycles_count
+        config = self.coordinator.config
+        plan = compute_watering_plan(
+            target_volume_liters=sum(data.cumulative_need.values()),
+            flow_rate_lph=config.flow_rate,
+            is_fractioned=config.watering_mode == WATERING_MODE_FRACTIONED,
+            cycles_count=config.cycles_count,
+            soak_duration_minutes=config.soak_duration_minutes,
+        )
         return {
-            ATTR_RECOMMENDED_DURATION_MINUTES: duration_minutes,
-            ATTR_IS_FRACTIONED: is_fractioned,
-            ATTR_CYCLES_COUNT: cycles,
-            ATTR_DURATION_PER_CYCLE_MINUTES: round(duration_minutes / cycles, 1) if cycles else 0,
-            ATTR_SOAK_DURATION_MINUTES: self.coordinator.config.soak_duration_minutes,
+            ATTR_RECOMMENDED_DURATION_MINUTES: plan.duration_minutes,
+            ATTR_IS_FRACTIONED: plan.is_fractioned,
+            ATTR_CYCLES_COUNT: plan.cycles_count,
+            ATTR_DURATION_PER_CYCLE_MINUTES: plan.duration_per_cycle_minutes,
+            ATTR_SOAK_DURATION_MINUTES: plan.soak_duration_minutes,
         }
 
 
@@ -365,11 +361,7 @@ class PrecipitationSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity
 
 
 class NextWateringSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity):
-    """Date et heure du prochain arrosage automatique planifié.
-
-    Lit les paramètres de planification depuis le coordinateur (runtime config)
-    et non depuis entry.options — compatible avec OptionsFlowWithReload.
-    """
+    """Date et heure du prochain arrosage automatique planifié."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_has_entity_name = True
@@ -386,6 +378,4 @@ class NextWateringSensor(CoordinatorEntity[IrrigationCoordinator], SensorEntity)
 
     @property
     def native_value(self) -> datetime | None:
-        if self.coordinator._scheduler is not None:
-            return self.coordinator._scheduler.next_trigger
-        return None
+        return self.coordinator.next_watering

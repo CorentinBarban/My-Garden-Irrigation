@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import aiohttp
@@ -29,6 +29,7 @@ from .config_state import RuntimeConfigState
 from .core.journal import DailyWaterLedger, WaterSource, WaterTransaction
 from .core.ledger import MidnightClosureOrchestrator
 from .core.strategies import WateringStrategyFactory, WateringVolumeStrategy
+from .core.watering_plan import compute_watering_plan
 from .const import (
     CONF_DENSITY,
     CONF_NB_PLANTS,
@@ -140,17 +141,17 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         await self.async_refresh()
 
     async def _on_midnight(self) -> None:
-        # ADR-026 : le journal de transactions est l'unique source du bilan
-        # journalier. replay() fournit le solde net (apport ETo − arrosages),
-        # déjà plancher à 0 et sans double-déduction. Si le journal est vide
-        # (aucune météo de la journée), le solde est {} et le cumulé est inchangé.
+        """Clôt la journée : ajoute le solde du journal au bilan cumulé et le réinitialise.
+
+        replay() fournit le solde net du jour (apport ETo − arrosages, planché à 0) ;
+        un journal vide donne un solde {} qui laisse le cumulé inchangé (ADR-023/026).
+        """
         daily_balance = self._daily_ledger.replay()
-        # ADR-023 : l'orchestrateur encode l'invariant d'équilibrage (étape 2).
         new_cumulative = MidnightClosureOrchestrator().execute(
-            self.config.cumulative_need, daily_balance, {}
+            self.config.cumulative_need, daily_balance
         )
-        self.config.apply_midnight_result(new_cumulative)   # étapes 2+4 atomiques
-        self._daily_ledger = DailyWaterLedger()             # réinitialisation du journal
+        self.config.apply_midnight_result(new_cumulative)
+        self._daily_ledger = DailyWaterLedger()
         await self._async_save()
         await self.async_refresh()
 
@@ -262,6 +263,13 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self.config.update_last_watering_date(date_iso)
         await self._async_save()
 
+    @property
+    def next_watering(self) -> datetime | None:
+        """Date et heure du prochain arrosage automatique, ou None si non planifié."""
+        if self._scheduler is None:
+            return None
+        return self._scheduler.next_trigger
+
     def _resolve_watering_strategy(self) -> WateringVolumeStrategy:
         """Sélectionne la stratégie de calcul du volume selon l'heure d'arrosage (ADR-024)."""
         return WateringStrategyFactory.from_irrigation_time(self.config.irrigation_time)
@@ -282,7 +290,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
         total_cumulative = sum(data.cumulative_need.values())
 
-        # Règle 2 (spec) : la stratégie choisit le volume selon l'heure d'arrosage (ADR-024)
+        # La stratégie choisit le volume cible selon l'heure d'arrosage (ADR-024).
         strategy = self._resolve_watering_strategy()
         total_volume = strategy.calculate_target_volume(
             total_cumulative, data.total_daily_need_liters
@@ -307,25 +315,30 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             )
             return False
 
-        duration_minutes = round((total_volume / flow_rate) * 60, 1)
         is_fractioned = self.config.watering_mode == WATERING_MODE_FRACTIONED
+        plan = compute_watering_plan(
+            target_volume_liters=total_volume,
+            flow_rate_lph=flow_rate,
+            is_fractioned=is_fractioned,
+            cycles_count=self.config.cycles_count,
+            soak_duration_minutes=self.config.soak_duration_minutes,
+        )
 
         payload: dict[str, Any] = {
             "entry_id": self._entry.entry_id,
             "valve_entity_id": self.config.valve_entity_id,
-            "total_volume_liters": round(total_volume, 1),
-            "recommended_duration_minutes": duration_minutes,
-            "is_fractioned": is_fractioned,
+            "total_volume_liters": plan.target_volume_liters,
+            "recommended_duration_minutes": plan.duration_minutes,
+            "is_fractioned": plan.is_fractioned,
         }
         if is_fractioned:
-            cycles = max(1, self.config.cycles_count)
-            payload["cycles_count"] = cycles
-            payload["duration_per_cycle_minutes"] = round(duration_minutes / cycles, 1)
-            payload["soak_duration_minutes"] = self.config.soak_duration_minutes
-        else:
-            cycles = 1
+            payload["cycles_count"] = plan.cycles_count
+            payload["duration_per_cycle_minutes"] = plan.duration_per_cycle_minutes
+            payload["soak_duration_minutes"] = plan.soak_duration_minutes
 
-        self.config.begin_irrigation_session(cycles)
+        # Une session continue compte une seule fermeture ; en mode fractionné, autant
+        # de fermetures que de cycles (le ValveTracker ne comptabilise qu'à la dernière).
+        self.config.begin_irrigation_session(plan.cycles_count if is_fractioned else 1)
         self.hass.bus.async_fire(f"{DOMAIN}_irrigation_requested", payload)
         _LOGGER.info(
             "Événement %s_irrigation_requested émis — volume=%.1fL "
@@ -334,7 +347,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             total_volume,
             total_cumulative,
             f" + journalier={data.total_daily_need_liters:.1f}L" if is_evening else "",
-            duration_minutes,
+            plan.duration_minutes,
             self.config.watering_mode,
         )
         return True

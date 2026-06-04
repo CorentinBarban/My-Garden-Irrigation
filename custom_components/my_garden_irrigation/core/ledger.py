@@ -35,56 +35,44 @@ def allocate_volume_by_surface(
 
 def midnight_transfer(
     cumulative_need: dict[str, float],
-    daily_needs: dict[str, float],
-    watering_applied_today: dict[str, float] | None = None,
+    daily_balance: dict[str, float],
 ) -> dict[str, float]:
-    """Transfère le besoin journalier résiduel vers le bilan hydrique cumulé.
+    """Ajoute le solde hydrique du jour au bilan cumulé, par culture.
 
-    Applique la Règle 1 : soustrait les arrosages du jour avant d'accumuler,
-    avec plancher à 0 (le sol ne crédite pas d'eau négative).
-    Opère sur des copies — ne mute pas les arguments.
+    Le solde du jour (apport ETo moins arrosages, déjà planché à 0) est fourni
+    par DailyWaterLedger.replay() — la déduction des arrosages est faite en amont,
+    cette fonction se contente d'accumuler. Le résultat est planché à 0 et opère
+    sur une copie : les dictionnaires d'entrée ne sont pas mutés.
 
     Args:
         cumulative_need: Bilan cumulé existant (crop_id → litres).
-        daily_needs: Besoin journalier par culture (crop_id → litres).
-        watering_applied_today: Volumes arrosés dans la journée (crop_id → litres).
-            Si None, aucune déduction n'est appliquée (rétrocompatibilité).
+        daily_balance: Solde net du jour par culture (crop_id → litres).
 
     Returns:
-        Nouveau bilan cumulé mis à jour.
+        Nouveau bilan cumulé.
     """
-    _applied = watering_applied_today or {}
     result = dict(cumulative_need)
-    for crop_id, daily in daily_needs.items():
-        applied = _applied.get(crop_id, 0.0)
-        result[crop_id] = max(0.0, result.get(crop_id, 0.0) + daily - applied)
+    for crop_id, daily in daily_balance.items():
+        result[crop_id] = max(0.0, result.get(crop_id, 0.0) + daily)
     return result
 
 
 class MidnightClosureOrchestrator:
-    """Encode l'invariant algorithmique de la clôture comptable de minuit (ADR-023).
+    """Applique la clôture comptable de minuit (ADR-023).
 
     Pattern Template Method : l'ordre des étapes est fixé et non substituable.
     L'appelant (coordinator) reste responsable de la persistance et du refresh HA.
 
     Usage :
         orch = MidnightClosureOrchestrator()
-        new_cumulative = orch.execute(cumulative, daily_needs, watering_today)
+        new_cumulative = orch.execute(cumulative, daily_balance)
         config.apply_midnight_result(new_cumulative)
-
-    Testable sans aucun mock HA :
-        result = MidnightClosureOrchestrator().execute({"c1": 5.0}, {"c1": 3.0})
-        assert result["c1"] == 8.0
     """
 
     def execute(
         self,
         cumulative_need: dict[str, float],
-        daily_needs: dict[str, float],
-        watering_applied_today: dict[str, float] | None = None,
+        daily_balance: dict[str, float],
     ) -> dict[str, float]:
-        """Étape 2 de la clôture : équilibrage absolu selon la Règle 1.
-
-        Retourne le nouveau bilan cumulé. N'a aucun effet de bord.
-        """
-        return midnight_transfer(cumulative_need, daily_needs, watering_applied_today)
+        """Retourne le bilan cumulé après ajout du solde du jour. Sans effet de bord."""
+        return midnight_transfer(cumulative_need, daily_balance)
