@@ -38,12 +38,41 @@ class DailyWaterLedger:
     def record(self, tx: WaterTransaction) -> None:
         self._transactions.append(tx)
 
+    def set_daily_need(self, crop_id: str, need: float, recorded_at: datetime) -> None:
+        """Enregistre (ou remplace) l'apport ETo journalier d'une culture.
+
+        Idempotent par culture : un seul apport ETo est conservé par jour, quel
+        que soit le nombre de rafraîchissements météo. Le besoin journalier
+        complet ne doit être compté qu'une fois au replay de minuit — sans cette
+        déduplication, un refresh horaire l'additionnerait ~24 fois.
+        """
+        self._transactions = [
+            tx
+            for tx in self._transactions
+            if not (tx.crop_id == crop_id and tx.source == WaterSource.ETO)
+        ]
+        self._transactions.append(
+            WaterTransaction(crop_id, need, WaterSource.ETO, recorded_at)
+        )
+
     def replay(self) -> dict[str, float]:
         """Recalcule le solde net par culture depuis zéro (plancher 0)."""
         balance: dict[str, float] = {}
         for tx in self._transactions:
             balance[tx.crop_id] = balance.get(tx.crop_id, 0.0) + tx.volume_liters
         return {k: max(0.0, v) for k, v in balance.items()}
+
+    def applied_volumes(self) -> dict[str, float]:
+        """Volumes arrosés aujourd'hui par culture (litres positifs).
+
+        Dérivé des transactions IRRIGATION (volume négatif) — source unique du
+        suivi intra-journée, en remplacement du dict watering_applied_today.
+        """
+        applied: dict[str, float] = {}
+        for tx in self._transactions:
+            if tx.source == WaterSource.IRRIGATION:
+                applied[tx.crop_id] = applied.get(tx.crop_id, 0.0) - tx.volume_liters
+        return applied
 
     def to_storage(self) -> list[dict]:
         return [

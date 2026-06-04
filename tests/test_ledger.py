@@ -314,3 +314,47 @@ def test_ledger_roundtrip_storage():
 def test_ledger_roundtrip_empty():
     restored = DailyWaterLedger.from_storage([])
     assert restored.replay() == {}
+
+
+# ---------------------------------------------------------------------------
+# ADR-026 — set_daily_need (ETo idempotent) + applied_volumes
+# ---------------------------------------------------------------------------
+
+def test_set_daily_need_is_idempotent_per_crop():
+    """Plusieurs refresh météo n'ajoutent pas le besoin ETo plusieurs fois (anti sur-comptage)."""
+    ledger = DailyWaterLedger()
+    ledger.set_daily_need("c1", 5.0, _NOW)
+    ledger.set_daily_need("c1", 5.0, _NOW)
+    ledger.set_daily_need("c1", 5.0, _NOW)
+    assert ledger.replay()["c1"] == pytest.approx(5.0)
+
+def test_set_daily_need_replaces_with_latest_value():
+    """Le dernier besoin ETo connu remplace le précédent."""
+    ledger = DailyWaterLedger()
+    ledger.set_daily_need("c1", 5.0, _NOW)
+    ledger.set_daily_need("c1", 7.0, _NOW)
+    assert ledger.replay()["c1"] == pytest.approx(7.0)
+
+def test_set_daily_need_preserves_irrigation():
+    """Le remplacement de l'apport ETo ne touche pas les transactions d'arrosage."""
+    ledger = DailyWaterLedger()
+    ledger.set_daily_need("c1", 5.0, _NOW)
+    ledger.record(WaterTransaction("c1", -2.0, WaterSource.IRRIGATION, _NOW))
+    ledger.set_daily_need("c1", 5.0, _NOW)  # nouveau refresh météo
+    assert ledger.replay()["c1"] == pytest.approx(3.0)  # 5 − 2, arrosage conservé
+
+def test_applied_volumes_sums_irrigation_as_positive():
+    ledger = DailyWaterLedger()
+    ledger.set_daily_need("c1", 5.0, _NOW)
+    ledger.record(WaterTransaction("c1", -2.0, WaterSource.IRRIGATION, _NOW))
+    ledger.record(WaterTransaction("c1", -1.5, WaterSource.IRRIGATION, _NOW))
+    assert ledger.applied_volumes()["c1"] == pytest.approx(3.5)
+
+def test_applied_volumes_ignores_eto():
+    """applied_volumes ne reflète que les arrosages, pas l'apport ETo."""
+    ledger = DailyWaterLedger()
+    ledger.set_daily_need("c1", 5.0, _NOW)
+    assert ledger.applied_volumes() == {}
+
+def test_applied_volumes_empty():
+    assert DailyWaterLedger().applied_volumes() == {}

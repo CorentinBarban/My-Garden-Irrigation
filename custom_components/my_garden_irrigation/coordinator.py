@@ -121,7 +121,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             # Toujours sauvegarder pour maintenir l'options_hash cohérent avec
             # entry.options courant (évite l'invalidation des overrides entity
             # lors d'un rechargement déclenché par l'OptionsFlow).
-            await self._persistence.async_save(self._build_storage())
+            await self._async_save()
             if new_crops_added:
                 await self._async_recompute_from_cache()
 
@@ -136,42 +136,22 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             self._daily_ledger.record(
                 WaterTransaction(crop_id, -vol, WaterSource.IRRIGATION, now)
             )
-        await self._persistence.async_save(self._build_storage())
+        await self._async_save()
         await self.async_refresh()
 
-    def _resolve_daily_needs(self) -> dict[str, float]:
-        """Collecte les besoins journaliers avec fallback sur le cache connu (ADR-023 étape 1)."""
-        if self.data is not None:
-            return {cid: r.daily_need_liters for cid, r in self.data.crops.items()}
-        if self._last_daily_needs:
-            _LOGGER.warning(
-                "Données météo indisponibles au transfert de minuit — "
-                "utilisation du dernier besoin journalier connu."
-            )
-            return self._last_daily_needs
-        _LOGGER.warning("Aucune donnée météo disponible pour le transfert de minuit.")
-        return {}
-
     async def _on_midnight(self) -> None:
-        _orch = MidnightClosureOrchestrator()
-
-        if self._daily_ledger:
-            # ADR-026 : replay du journal — solde net déjà déduit des arrosages
-            daily_balance = self._daily_ledger.replay()
-            # ADR-023 : orchestrateur encode l'invariant étape 2 (pas de double-déduction)
-            new_cumulative = _orch.execute(
-                self.config.cumulative_need, daily_balance, {}
-            )
-        else:
-            # Fallback : chemin classique si le journal est vide (démarrage sans données)
-            daily_needs = self._resolve_daily_needs()
-            new_cumulative = _orch.execute(
-                self.config.cumulative_need, daily_needs, self.config.watering_applied_today
-            )
-
+        # ADR-026 : le journal de transactions est l'unique source du bilan
+        # journalier. replay() fournit le solde net (apport ETo − arrosages),
+        # déjà plancher à 0 et sans double-déduction. Si le journal est vide
+        # (aucune météo de la journée), le solde est {} et le cumulé est inchangé.
+        daily_balance = self._daily_ledger.replay()
+        # ADR-023 : l'orchestrateur encode l'invariant d'équilibrage (étape 2).
+        new_cumulative = MidnightClosureOrchestrator().execute(
+            self.config.cumulative_need, daily_balance, {}
+        )
         self.config.apply_midnight_result(new_cumulative)   # étapes 2+4 atomiques
         self._daily_ledger = DailyWaterLedger()             # réinitialisation du journal
-        await self._persistence.async_save(self._build_storage())
+        await self._async_save()
         await self.async_refresh()
 
     async def _on_trigger(self, date_iso: str) -> None:
@@ -219,7 +199,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
                 self.config.scale_cumulative_need(crop_id, scale)
         else:
             self.config.update_crop_field(crop_id, field, value)
-        await self._persistence.async_save(self._build_storage())
+        await self._async_save()
         await self.async_refresh()
 
     def set_flow_rate(self, value: float) -> None:
@@ -267,7 +247,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
     async def async_set_auto_irrigation(self, enabled: bool) -> None:
         self.config.set_auto_irrigation(enabled, dt_util.now().date().isoformat())
-        await self._persistence.async_save(self._build_storage())
+        await self._async_save()
         if self._scheduler is not None:
             self._scheduler.reschedule_auto_irrigation()
         await self.async_refresh()
@@ -275,12 +255,12 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     async def async_reset_irrigation(self) -> None:
         self.config.reset_irrigation()
         self._daily_ledger = DailyWaterLedger()
-        await self._persistence.async_save(self._build_storage())
+        await self._async_save()
         await self.async_refresh()
 
     async def update_last_watering_date(self, date_iso: str) -> None:
         self.config.update_last_watering_date(date_iso)
-        await self._persistence.async_save(self._build_storage())
+        await self._async_save()
 
     def _resolve_watering_strategy(self) -> WateringVolumeStrategy:
         """Sélectionne la stratégie de calcul du volume selon l'heure d'arrosage (ADR-024)."""
@@ -386,15 +366,13 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             eto_mm=eto_mm,
             precipitation_mm=precipitation_mm,
             kc_getter=get_kc,
-            watering_applied_today=self.config.watering_applied_today,
+            watering_applied_today=self._daily_ledger.applied_volumes(),
             cumulative_need=self.config.cumulative_need,
         )
         now = dt_util.now()
         self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
-        for crop_id, vol in self._last_daily_needs.items():
-            self._daily_ledger.record(
-                WaterTransaction(crop_id, vol, WaterSource.ETO, now)
-            )
+        for crop_id, need in self._last_daily_needs.items():
+            self._daily_ledger.set_daily_need(crop_id, need, now)
         return data
 
     async def _async_recompute_from_cache(self) -> None:
@@ -413,10 +391,13 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             eto_mm=eto_mm,
             precipitation_mm=precipitation_mm,
             kc_getter=get_kc,
-            watering_applied_today=self.config.watering_applied_today,
+            watering_applied_today=self._daily_ledger.applied_volumes(),
             cumulative_need=self.config.cumulative_need,
         )
+        now = dt_util.now()
         self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
+        for crop_id, need in self._last_daily_needs.items():
+            self._daily_ledger.set_daily_need(crop_id, need, now)
         self.async_set_updated_data(data)
 
     @callback
@@ -519,6 +500,20 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             storage["daily_ledger_date"] = dt_util.now().date().isoformat()
         return storage
 
+    async def _async_save(self) -> None:
+        """Point d'entrée unique de la persistance : immédiat et résilient.
+
+        Centralise _build_storage() et la gestion d'erreur. Les actions async
+        (arrosage, minuit, reset…) l'appellent directement ; les setters
+        synchrones passent par _schedule_config_save() (debounce) qui délègue ici.
+        Une erreur de Store est journalisée sans interrompre l'appelant : l'état
+        en mémoire reste à jour et sera persisté au prochain enregistrement.
+        """
+        try:
+            await self._persistence.async_save(self._build_storage())
+        except Exception as exc:
+            _LOGGER.warning("Échec de la sauvegarde de l'état : %s", exc)
+
     @callback
     def _notify_listeners(self) -> None:
         """Notifie les entités d'un changement de config sans appel météo.
@@ -532,7 +527,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             self.async_update_listeners()
 
     def _schedule_config_save(self) -> None:
-        """Planifie une sauvegarde avec debounce 0.5 s et gestion d'erreur."""
+        """Planifie une sauvegarde avec debounce 0.5 s (coalesce les réglages UI rapides)."""
         if self._save_unsub is not None:
             self._save_unsub()
 
@@ -540,14 +535,8 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         def _trigger(_now=None) -> None:
             self._save_unsub = None
             self.hass.async_create_task(
-                self._persist_config(), name=f"{DOMAIN}_config_save"
+                self._async_save(), name=f"{DOMAIN}_config_save"
             )
 
         self._save_unsub = async_call_later(self.hass, 0.5, _trigger)
-
-    async def _persist_config(self) -> None:
-        try:
-            await self._persistence.async_save(self._build_storage())
-        except Exception as exc:
-            _LOGGER.warning("Échec de la sauvegarde de la configuration : %s", exc)
 

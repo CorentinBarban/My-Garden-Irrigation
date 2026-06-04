@@ -72,7 +72,6 @@ def test_init_reads_irrigation_time():
 def test_init_defaults_empty_state():
     state = _make_state()
     assert state.cumulative_need == {}
-    assert state.watering_applied_today == {}
     assert state.auto_irrigation_enabled is False
     assert state.last_auto_watering_date is None
     assert state.get_valve_open_time() is None
@@ -191,10 +190,13 @@ def test_update_last_watering_date():
 # ---------------------------------------------------------------------------
 
 def test_apply_watering_volumes_accumulates():
-    state = _make_state()
+    """Deux arrosages successifs réduisent cumulativement le déficit."""
+    crops = [_crop("c1")]
+    state = RuntimeConfigState(_options(**{CONF_CROPS: crops}))
+    state._cumulative_need = {"c1": 10.0}
     state.apply_watering_volumes({"c1": 5.0})
     state.apply_watering_volumes({"c1": 3.0})
-    assert state.watering_applied_today["c1"] == pytest.approx(8.0)
+    assert state.cumulative_need["c1"] == pytest.approx(2.0)
 
 def test_apply_watering_volumes_partial_reduces_deficit():
     """Arrosage partiel : le déficit résiduel (déficit − volume) est conservé."""
@@ -203,7 +205,6 @@ def test_apply_watering_volumes_partial_reduces_deficit():
     state._cumulative_need = {"c1": 10.0}
     state.apply_watering_volumes({"c1": 3.0})
     assert state.cumulative_need["c1"] == pytest.approx(7.0)
-    assert state.watering_applied_today["c1"] == pytest.approx(3.0)
 
 def test_apply_watering_volumes_exceeds_deficit_clamps_to_zero():
     """Volume distribué ≥ déficit : le cumulé est ramené à 0, pas en négatif."""
@@ -224,31 +225,11 @@ def test_apply_watering_volumes_unwatered_crop_unchanged():
     assert state.cumulative_need["c2"] == pytest.approx(8.0)
 
 def test_apply_watering_volumes_empty():
-    state = _make_state()
+    crops = [_crop("c1")]
+    state = RuntimeConfigState(_options(**{CONF_CROPS: crops}))
+    state._cumulative_need = {"c1": 10.0}
     state.apply_watering_volumes({})
-    assert state.watering_applied_today == {}
-
-
-# ---------------------------------------------------------------------------
-# apply_midnight_transfer
-# ---------------------------------------------------------------------------
-
-def test_apply_midnight_transfer_accumulates():
-    state = _make_state()
-    state._cumulative_need = {"c1": 5.0}
-    state.apply_midnight_transfer({"c1": 3.0})
-    assert state.cumulative_need["c1"] == pytest.approx(8.0)
-
-def test_apply_midnight_transfer_resets_daily():
-    state = _make_state()
-    state._watering_applied_today = {"c1": 7.0}
-    state.apply_midnight_transfer({"c1": 3.0})
-    assert state.watering_applied_today == {}
-
-def test_apply_midnight_transfer_new_crop():
-    state = _make_state()
-    state.apply_midnight_transfer({"c_new": 4.0})
-    assert state.cumulative_need["c_new"] == pytest.approx(4.0)
+    assert state.cumulative_need["c1"] == pytest.approx(10.0)
 
 
 # ---------------------------------------------------------------------------
@@ -258,20 +239,8 @@ def test_apply_midnight_transfer_new_crop():
 def test_reset_irrigation_clears_cumulative():
     state = _make_state()
     state._cumulative_need = {"c1": 20.0}
-    state._watering_applied_today = {"c1": 5.0}
     state.reset_irrigation()
     assert state.cumulative_need == {}
-    assert state.watering_applied_today == {}
-
-
-# ---------------------------------------------------------------------------
-# init_cumulative_need
-# ---------------------------------------------------------------------------
-
-def test_init_cumulative_need():
-    state = _make_state()
-    state.init_cumulative_need({"c1": 12.0, "c2": 8.0})
-    assert state.cumulative_need == {"c1": pytest.approx(12.0), "c2": pytest.approx(8.0)}
 
 
 # ---------------------------------------------------------------------------
@@ -347,25 +316,6 @@ def test_storage_round_trip_config_overrides():
     assert restored.irrigation_time == "19:00:00"
     assert restored.cumulative_need == {"c1": pytest.approx(15.0)}
 
-def test_storage_date_boundary_resets_daily():
-    state = _make_state()
-    state._watering_applied_today = {"c1": 5.0}
-    payload = state.to_storage("2026-05-30")  # sauvegardé hier
-
-    restored = _make_state()
-    restored.restore_from_storage(payload, "2026-05-31")  # aujourd'hui = demain
-    # watering_applied_today doit être remis à zéro (nouveau jour)
-    assert restored.watering_applied_today == {}
-
-def test_storage_same_day_restores_daily():
-    state = _make_state()
-    state._watering_applied_today = {"c1": 5.0}
-    payload = state.to_storage("2026-05-31")
-
-    restored = _make_state()
-    restored.restore_from_storage(payload, "2026-05-31")
-    assert restored.watering_applied_today == {"c1": pytest.approx(5.0)}
-
 def test_storage_options_hash_mismatch_discards_overrides():
     """Si options ont changé depuis le save, les overrides runtime sont ignorés."""
     state = _make_state()
@@ -415,40 +365,3 @@ def test_consume_session_close_without_active_session_returns_true():
     assert state.consume_session_close() is True
 
 
-# ---------------------------------------------------------------------------
-# apply_midnight_transfer — déduction arrosage (Règle 1 spec)
-# ---------------------------------------------------------------------------
-
-def test_apply_midnight_transfer_deducts_watering_to_zero():
-    """Scénario I spec : arrosage matinal couvre cumul + journalier → dette = 0 au matin J+1."""
-    state = _make_state(**{CONF_CROPS: [_crop("c1")]})
-    # cumul déjà soldé par apply_watering_volumes (simulate post-morning-irrigation state)
-    state._cumulative_need = {"c1": 0.0}
-    state._watering_applied_today = {"c1": 8.0}
-
-    state.apply_midnight_transfer({"c1": 4.0})
-
-    assert state.cumulative_need["c1"] == pytest.approx(0.0)
-    assert state.watering_applied_today == {}   # remis à zéro
-
-def test_apply_midnight_transfer_residual_debt():
-    """Arrosage partiel : dette résiduelle = cumul + journalier - arrosé."""
-    state = _make_state(**{CONF_CROPS: [_crop("c1")]})
-    state._cumulative_need = {"c1": 5.0}
-    state._watering_applied_today = {"c1": 3.0}
-
-    state.apply_midnight_transfer({"c1": 2.0})
-
-    # max(0, 5 + 2 - 3) = 4
-    assert state.cumulative_need["c1"] == pytest.approx(4.0)
-    assert state.watering_applied_today == {}
-
-def test_apply_midnight_transfer_no_watering_accumulates_normally():
-    """Sans arrosage dans la journée, accumulation simple (comportement antérieur)."""
-    state = _make_state(**{CONF_CROPS: [_crop("c1")]})
-    state._cumulative_need = {"c1": 6.0}
-    state._watering_applied_today = {}
-
-    state.apply_midnight_transfer({"c1": 2.0})
-
-    assert state.cumulative_need["c1"] == pytest.approx(8.0)

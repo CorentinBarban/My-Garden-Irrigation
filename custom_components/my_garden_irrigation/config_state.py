@@ -34,7 +34,6 @@ from .const import (
     MAX_REASONABLE_SURFACE_M2,
 )
 from .core.calculations import compute_surface_m2
-from .core.ledger import midnight_transfer
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -115,8 +114,8 @@ class RuntimeConfigState:
             options.get(CONF_SOAK_DURATION, DEFAULT_SOAK_DURATION_MINUTES)
         )
 
-        # Bilan hydrique (ADR-008)
-        self._watering_applied_today: dict[str, float] = {}
+        # Bilan hydrique (ADR-008). Le suivi des arrosages du jour n'est plus
+        # stocké ici : il est dérivé du journal de transactions (ADR-026).
         self._cumulative_need: dict[str, float] = {}
 
         # État arrosage automatique
@@ -153,9 +152,6 @@ class RuntimeConfigState:
             return
 
         self._cumulative_need = stored.get("cumulative_need", {})
-        if stored.get("watering_date") == now_date_iso:
-            self._watering_applied_today = stored.get("watering_applied_today", {})
-
         self._auto_enabled = stored.get("auto_irrigation_enabled", False)
         self._last_auto_watering_date = stored.get("last_auto_watering_date")
         self._next_watering_override = stored.get("next_watering_override")
@@ -200,8 +196,6 @@ class RuntimeConfigState:
         """Sérialise l'état complet pour le Store HA."""
         return {
             "cumulative_need": self._cumulative_need,
-            "watering_applied_today": self._watering_applied_today,
-            "watering_date": now_date_iso,
             "auto_irrigation_enabled": self._auto_enabled,
             "last_auto_watering_date": self._last_auto_watering_date,
             "next_watering_override": self._next_watering_override,
@@ -234,10 +228,6 @@ class RuntimeConfigState:
     @property
     def crops(self) -> list[dict]:
         return self._crop_data
-
-    @property
-    def watering_applied_today(self) -> dict[str, float]:
-        return self._watering_applied_today
 
     @property
     def cumulative_need(self) -> dict[str, float]:
@@ -374,61 +364,33 @@ class RuntimeConfigState:
     # ------------------------------------------------------------------
 
     def apply_watering_volumes(self, volumes: dict[str, float]) -> None:
-        """Impute les volumes distribués par culture et réduit le déficit cumulé en conséquence."""
-        for crop_id, vol in volumes.items():
-            self._watering_applied_today[crop_id] = (
-                self._watering_applied_today.get(crop_id, 0.0) + vol
-            )
+        """Réduit le déficit cumulé des volumes distribués par culture (plancher 0).
+
+        Le suivi des volumes arrosés du jour est dérivé du journal de
+        transactions (DailyWaterLedger.applied_volumes) — il n'est plus
+        dupliqué ici (ADR-026).
+        """
         for crop_id in self._get_crop_ids():
             current = self._cumulative_need.get(crop_id, 0.0)
             distributed = volumes.get(crop_id, 0.0)
             self._cumulative_need[crop_id] = max(0.0, current - distributed)
 
-    def apply_midnight_transfer(self, daily_needs: dict[str, float]) -> None:
-        """Accumule les besoins journaliers au cumulé, remet le suivi du jour à zéro."""
-        self._cumulative_need = midnight_transfer(
-            self._cumulative_need, daily_needs, self._watering_applied_today
-        )
-        _LOGGER.debug(
-            "RuntimeConfigState : accumulation minuit — bilan cumulé : %s",
-            {k: round(v, 1) for k, v in self._cumulative_need.items()},
-        )
-        self._watering_applied_today = {}
-
-    def apply_midnight_transfer_from_balance(self, daily_balance: dict[str, float]) -> None:
-        """Clôture de minuit depuis le replay du journal de transactions (ADR-026).
-
-        daily_balance est déjà net (besoin - arrosage, ≥ 0) : ne pas déduire
-        _watering_applied_today une seconde fois.
-        """
-        self._cumulative_need = midnight_transfer(self._cumulative_need, daily_balance, {})
-        _LOGGER.debug(
-            "RuntimeConfigState : accumulation minuit (ledger) — bilan cumulé : %s",
-            {k: round(v, 1) for k, v in self._cumulative_need.items()},
-        )
-        self._watering_applied_today = {}
-
     def apply_midnight_result(self, new_cumulative: dict[str, float]) -> None:
         """Applique le résultat calculé par MidnightClosureOrchestrator (ADR-023).
 
-        Reçoit le nouveau bilan pré-calculé (pur Python, sans effet de bord)
-        et remet le suivi du jour à zéro atomiquement.
+        Reçoit le nouveau bilan pré-calculé (pur Python, sans effet de bord).
+        Le suivi du jour est porté par le journal de transactions, réinitialisé
+        séparément par le coordinator (ADR-026).
         """
         self._cumulative_need = new_cumulative
         _LOGGER.debug(
             "RuntimeConfigState : accumulation minuit (orchestrateur) — bilan cumulé : %s",
             {k: round(v, 1) for k, v in self._cumulative_need.items()},
         )
-        self._watering_applied_today = {}
 
     def reset_irrigation(self) -> None:
-        """Remet le bilan hydrique cumulé et les arrosages du jour à zéro."""
+        """Remet le bilan hydrique cumulé à zéro (le journal du jour est purgé par le coordinator)."""
         self._cumulative_need = {}
-        self._watering_applied_today = {}
-
-    def init_cumulative_need(self, daily_needs: dict[str, float]) -> None:
-        """Initialise le cumulé au premier démarrage depuis les besoins journaliers."""
-        self._cumulative_need = dict(daily_needs)
 
     def init_missing_crops(self, daily_needs: dict[str, float]) -> bool:
         """Initialise le cumulé pour les cultures absentes du bilan.
@@ -480,8 +442,6 @@ class RuntimeConfigState:
         current_ids = {crop[CONF_CROP_ID] for crop in self._crop_data}
         for stale_id in set(self._cumulative_need) - current_ids:
             del self._cumulative_need[stale_id]
-        for stale_id in set(self._watering_applied_today) - current_ids:
-            del self._watering_applied_today[stale_id]
 
     def _get_crop_ids(self) -> list[str]:
         return [crop[CONF_CROP_ID] for crop in self._crop_data]

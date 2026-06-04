@@ -8,7 +8,7 @@ Bugs couverts :
     #2  coordinator   : update_crop_field déclenche _schedule_config_save()
     #3  coordinator   : fire_irrigation_event — pas de ZeroDivisionError si cycles_count=0
     #4  coordinator   : _on_midnight utilise _last_daily_needs quand self.data is None
-    #5  coordinator   : _persist_config log WARNING si la sauvegarde échoue (pas silence)
+    #5  coordinator   : _async_save log WARNING si la sauvegarde échoue (pas silence)
     #6  coordinator   : _async_update_data met à jour _last_daily_needs après chaque succès
     #7  valve_tracker : _restore_valve_state absorbe les exceptions (try/except)
     #8  valve_tracker : warning loggué si valve_entity_id est absent
@@ -241,29 +241,31 @@ def test_fire_irrigation_event_cycles_payload_uses_max():
 
 
 # ---------------------------------------------------------------------------
-# Fix #4 — coordinator : _on_midnight utilise _last_daily_needs si data=None
+# Fix #4 — coordinator : _on_midnight rejoue le journal (source unique ADR-026)
 # ---------------------------------------------------------------------------
 
-def test_on_midnight_uses_last_daily_needs_when_data_none():
-    """Si `self.data is None`, le transfert doit utiliser `_last_daily_needs`."""
+def test_on_midnight_replays_ledger_even_when_data_none():
+    """Même si `self.data is None`, le transfert s'appuie sur le journal persisté."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+    from custom_components.my_garden_irrigation.core.journal import WaterSource
 
     class FakeCoord:
         data = None
-        _last_daily_needs = {"c1": 5.0, "c2": 3.0}
 
         def __init__(self) -> None:
             self.config = _make_state()
             self._persistence = MagicMock()
             self._persistence.async_save = AsyncMock()
             self.async_refresh = AsyncMock()
+            self._async_save = AsyncMock()
+            # Le journal porte l'apport ETo du jour, alimenté avant la panne météo.
             self._daily_ledger = DailyWaterLedger()
+            now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+            self._daily_ledger.set_daily_need("c1", 5.0, now)
+            self._daily_ledger.set_daily_need("c2", 3.0, now)
 
         def _build_storage(self):
             return self.config.to_storage("2026-05-31")
-
-        def _resolve_daily_needs(self):
-            return IrrigationCoordinator._resolve_daily_needs(self)
 
     coord = FakeCoord()
 
@@ -275,26 +277,23 @@ def test_on_midnight_uses_last_daily_needs_when_data_none():
     assert coord.config.cumulative_need.get("c2") == pytest.approx(3.0)
 
 
-def test_on_midnight_empty_when_no_data_and_no_last():
-    """Sans data ni _last_daily_needs, le transfert est vide sans crash."""
+def test_on_midnight_empty_ledger_no_transfer():
+    """Journal vide (aucune météo de la journée) : le cumulé reste inchangé, sans crash."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
         data = None
-        _last_daily_needs: dict = {}
 
         def __init__(self) -> None:
             self.config = _make_state()
             self._persistence = MagicMock()
             self._persistence.async_save = AsyncMock()
             self.async_refresh = AsyncMock()
+            self._async_save = AsyncMock()
             self._daily_ledger = DailyWaterLedger()
 
         def _build_storage(self):
             return self.config.to_storage("2026-05-31")
-
-        def _resolve_daily_needs(self):
-            return IrrigationCoordinator._resolve_daily_needs(self)
 
     coord = FakeCoord()
 
@@ -306,11 +305,11 @@ def test_on_midnight_empty_when_no_data_and_no_last():
 
 
 # ---------------------------------------------------------------------------
-# Fix #5 — coordinator : _persist_config log warning si save échoue
+# Fix #5 — coordinator : _async_save log warning si save échoue (résilience)
 # ---------------------------------------------------------------------------
 
-def test_persist_config_logs_warning_on_exception(caplog):
-    """`_persist_config` doit logguer un WARNING si la sauvegarde échoue."""
+def test_async_save_logs_warning_on_exception(caplog):
+    """`_async_save` doit logguer un WARNING si la sauvegarde échoue, sans propager."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
@@ -328,7 +327,7 @@ def test_persist_config_logs_warning_on_exception(caplog):
     with patch("custom_components.my_garden_irrigation.coordinator.dt_util") as mock_dt:
         mock_dt.now.return_value.date.return_value.isoformat.return_value = "2026-05-31"
         with caplog.at_level(logging.WARNING, logger="custom_components.my_garden_irrigation.coordinator"):
-            _run(IrrigationCoordinator._persist_config(coord))
+            _run(IrrigationCoordinator._async_save(coord))  # ne doit pas lever
 
     assert "Échec de la sauvegarde" in caplog.text
 
@@ -558,6 +557,7 @@ def test_async_update_nb_plants_scales_cumulative():
             self._persistence = MagicMock()
             self._persistence.async_save = AsyncMock()
             self.async_refresh = AsyncMock()
+            self._async_save = AsyncMock()
             self._daily_ledger = DailyWaterLedger()
 
         def _build_storage(self):
@@ -584,6 +584,7 @@ def test_async_update_density_scales_cumulative():
             self._persistence = MagicMock()
             self._persistence.async_save = AsyncMock()
             self.async_refresh = AsyncMock()
+            self._async_save = AsyncMock()
             self._daily_ledger = DailyWaterLedger()
 
         def _build_storage(self):
@@ -609,6 +610,7 @@ def test_async_update_stage_no_cumulative_scaling():
             self._persistence = MagicMock()
             self._persistence.async_save = AsyncMock()
             self.async_refresh = AsyncMock()
+            self._async_save = AsyncMock()
             self._daily_ledger = DailyWaterLedger()
 
         def _build_storage(self):
@@ -638,6 +640,7 @@ def test_async_update_no_cumulative_when_zero_old_surface():
             self._persistence = MagicMock()
             self._persistence.async_save = AsyncMock()
             self.async_refresh = AsyncMock()
+            self._async_save = AsyncMock()
             self._daily_ledger = DailyWaterLedger()
 
         def _build_storage(self):
@@ -737,14 +740,11 @@ def test_cleanup_stale_crops_removes_from_cumulative():
     }
     state = RuntimeConfigState(_options(**{CONF_CROPS: [crop]}))
     state._cumulative_need = {"c1": 10.0, "c_old": 25.0}
-    state._watering_applied_today = {"c1": 2.0, "c_old": 8.0}
 
     state.cleanup_stale_crops()
 
     assert "c_old" not in state.cumulative_need
-    assert "c_old" not in state.watering_applied_today
     assert state.cumulative_need["c1"] == pytest.approx(10.0)
-    assert state.watering_applied_today["c1"] == pytest.approx(2.0)
 
 
 def test_cleanup_stale_crops_empty_noop():
@@ -1179,6 +1179,7 @@ def test_async_recompute_from_cache_uses_cached_weather():
             self.config = _make_state()
             self._kc_data = {}
             self._updated_data = None
+            self._daily_ledger = DailyWaterLedger()
 
         def async_set_updated_data(self, data) -> None:
             self._updated_data = data
@@ -1238,6 +1239,7 @@ def test_async_update_data_caches_last_weather():
             self.config = _make_state()
             self._kc_data = {}
             self.data = None
+            self._daily_ledger = DailyWaterLedger()
 
         async def _fetch_weather(self):
             return 5.0, 2.0
