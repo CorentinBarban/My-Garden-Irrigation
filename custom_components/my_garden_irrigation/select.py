@@ -1,9 +1,9 @@
 """Plateforme select — My Garden Irrigation.
 
-StageSelect hérite de RestoreEntity (valeur modifiable sans formulaire).
-WateringFrequencySelect et WateringModeSelect lisent depuis le coordinateur
-(initialisé depuis entry.options) — après un rechargement via le formulaire,
-c'est entry.options qui fait autorité, pas le dernier état HA.
+Toutes les entités lisent depuis le coordinateur, source unique de vérité.
+Le stade par culture (StageSelect) est persisté dans le Store HA via
+PersistenceManager et restauré au boot — plus de RestoreEntity. Après un
+rechargement via le formulaire, c'est entry.options qui fait autorité.
 """
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_CROP_ID,
@@ -46,8 +45,8 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class StageSelect(SelectEntity, RestoreEntity):
-    """Contrôle le stade de croissance d'une culture (RestoreEntity)."""
+class StageSelect(SelectEntity):
+    """Contrôle le stade de croissance d'une culture — vue sur le coordinateur."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "stage"
@@ -62,26 +61,16 @@ class StageSelect(SelectEntity, RestoreEntity):
     ) -> None:
         self._coordinator = coordinator
         self._crop_id: str = crop[CONF_CROP_ID]
-        self._current: str = crop[CONF_STAGE]
         self._attr_unique_id = f"{entry.entry_id}_{self._crop_id}_stage"
         self._attr_device_info = _plant_device_info(entry, crop)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state in STAGES:
-            self._current = last.state
-        self._coordinator.update_crop_field(self._crop_id, CONF_STAGE, self._current)
-        await self._coordinator.async_request_refresh()
-
     @property
     def current_option(self) -> str:
-        return self._current
+        return self._coordinator.config.get_crop_field(self._crop_id, CONF_STAGE)
 
     async def async_select_option(self, option: str) -> None:
-        self._current = option
-        self.async_write_ha_state()
         await self._coordinator.async_update_crop_field(self._crop_id, CONF_STAGE, option)
+        self.async_write_ha_state()
 
 
 class WateringFrequencySelect(SelectEntity):

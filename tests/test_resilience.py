@@ -122,33 +122,56 @@ def test_midnight_reschedules_on_success():
 
 
 # ---------------------------------------------------------------------------
-# Fix #2 — coordinator : update_crop_field (boot) ne déclenche aucune sauvegarde
+# Direction B — persistance des champs par culture dans le Store HA
+# (remplace RestoreEntity : restauration au boot avant création des entités)
 # ---------------------------------------------------------------------------
 
-def test_update_crop_field_memory_only():
-    """`update_crop_field` met à jour la mémoire sans déclencher de sauvegarde Store."""
-    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
-
-    crop = {
-        CONF_CROP_ID: "c1",
+def _crop(crop_id="c1", nb_plants=10, density=2.0, stage="mid"):
+    return {
+        CONF_CROP_ID: crop_id,
         CONF_CROP_TYPE: "tomate",
-        CONF_STAGE: "mid",
-        CONF_NB_PLANTS: 10,
-        CONF_DENSITY: 2.0,
+        CONF_STAGE: stage,
+        CONF_NB_PLANTS: nb_plants,
+        CONF_DENSITY: density,
     }
 
-    class FakeCoord:
-        config = _make_state(**{CONF_CROPS: [crop]})
-        _save_calls: list = []
 
-        def _schedule_config_save(self) -> None:
-            self._save_calls.append(1)
+def test_crop_overrides_survive_restart():
+    """nb_plants/densité/stade modifiés via l'UI survivent au redémarrage via le Store."""
+    config = _make_state(**{CONF_CROPS: [_crop()]})
+    config.update_crop_field("c1", CONF_NB_PLANTS, 25)
+    config.update_crop_field("c1", CONF_DENSITY, 3.5)
+    config.update_crop_field("c1", CONF_STAGE, "end")
 
-    coord = FakeCoord()
-    IrrigationCoordinator.update_crop_field(coord, "c1", CONF_NB_PLANTS, 25)
+    # Redémarrage : nouvel état (re)construit depuis entry.options d'origine.
+    restored = _make_state(**{CONF_CROPS: [_crop()]})
+    restored.restore_from_storage(config.to_storage("2026-06-04"), "2026-06-04")
 
-    assert coord._save_calls == [], "update_crop_field (boot) ne doit pas déclencher de sauvegarde"
-    assert coord.config.crops[0][CONF_NB_PLANTS] == 25
+    crop = restored.crops[0]
+    assert crop[CONF_NB_PLANTS] == 25
+    assert crop[CONF_DENSITY] == 3.5
+    assert crop[CONF_STAGE] == "end"
+
+
+def test_crop_overrides_discarded_when_form_resubmitted():
+    """Si le formulaire est re-soumis (options modifiées), les overrides obsolètes sont ignorés."""
+    config = _make_state(**{CONF_CROPS: [_crop(nb_plants=10)]})
+    config.update_crop_field("c1", CONF_NB_PLANTS, 25)
+    stored = config.to_storage("2026-06-04")
+
+    # L'utilisateur re-soumet le formulaire avec nb_plants=8 : entry.options change,
+    # l'options_hash diffère → l'override persisté (25) est écarté, le formulaire prime.
+    restored = _make_state(**{CONF_CROPS: [_crop(nb_plants=8)]})
+    restored.restore_from_storage(stored, "2026-06-04")
+
+    assert restored.crops[0][CONF_NB_PLANTS] == 8
+
+
+def test_coordinator_has_no_silent_update_crop_field():
+    """Le chemin silencieux de restauration boot (update_crop_field) n'existe plus."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    assert not hasattr(IrrigationCoordinator, "update_crop_field")
 
 
 # ---------------------------------------------------------------------------
@@ -1571,7 +1594,8 @@ def test_set_watering_frequency_calls_reschedule():
     coord = FakeCoord()
     IrrigationCoordinator.set_watering_frequency(coord, WATERING_FREQUENCY_INTERVAL)
 
-    coord._scheduler.reschedule_auto_irrigation.assert_called_once()
+    # Ré-ancrage explicite : le prochain arrosage est recalé sur N jours pleins.
+    coord._scheduler.reschedule_auto_irrigation.assert_called_once_with(reanchor=True)
 
 
 def test_set_watering_interval_days_calls_reschedule():
@@ -1591,4 +1615,131 @@ def test_set_watering_interval_days_calls_reschedule():
     coord = FakeCoord()
     IrrigationCoordinator.set_watering_interval_days(coord, 4)
 
-    coord._scheduler.reschedule_auto_irrigation.assert_called_once()
+    coord._scheduler.reschedule_auto_irrigation.assert_called_once_with(reanchor=True)
+
+
+def test_compute_next_trigger_interval_reanchor_full_days():
+    """Ré-ancrage (changement d'intervalle) : next = N jours PLEINS depuis maintenant.
+
+    Bug : « tous les 3 jours » affichait « dans 2 jours » (interval - 1) car le
+    créneau d'arrosage (06:00) était déjà passé au moment de la configuration.
+    Avec le ré-ancrage, le compte à rebours affiché correspond à l'intervalle.
+    """
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    config = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: 3}
+    )
+    config.update_last_watering_date("2026-06-04")
+
+    hass = MagicMock()
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
+
+    # Configuration à 10:00, après le créneau d'arrosage de 06:00.
+    now = datetime(2026, 6, 4, 10, 0, 0, tzinfo=timezone.utc)
+    result = scheduler._compute_next_trigger(now, 6, 0, reanchor=True)
+
+    # +1 jour car le créneau de 06:00 est déjà passé → 08/06, soit 3 jours pleins.
+    assert result.date() == date(2026, 6, 8)
+    assert (result - now).days == 3
+
+
+def test_compute_next_trigger_interval_reanchor_before_slot():
+    """Ré-ancrage avant le créneau : pas de décalage, next = today + N à l'heure du créneau."""
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    config = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: 3}
+    )
+    config.update_last_watering_date("2026-06-04")
+
+    hass = MagicMock()
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
+
+    # Configuration à 05:00, avant le créneau de 06:00.
+    now = datetime(2026, 6, 4, 5, 0, 0, tzinfo=timezone.utc)
+    result = scheduler._compute_next_trigger(now, 6, 0, reanchor=True)
+
+    assert result.date() == date(2026, 6, 7)
+    assert (result - now).days == 3
+
+
+def test_compute_next_trigger_interval_no_reanchor_is_stable():
+    """Sans ré-ancrage (redémarrage/cycle), le calcul reste ancré sur le dernier arrosage.
+
+    Garantit l'absence de dérive : un redémarrage ne doit pas repousser l'arrosage.
+    """
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    config = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: 3}
+    )
+    config.update_last_watering_date("2026-06-04")
+
+    hass = MagicMock()
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
+
+    # Redémarrage le lendemain, à n'importe quelle heure : reste 04/06 + 3 = 07/06.
+    now = datetime(2026, 6, 5, 9, 0, 0, tzinfo=timezone.utc)
+    result = scheduler._compute_next_trigger(now, 6, 0, reanchor=False)
+
+    assert result.date() == date(2026, 6, 7)
+
+
+def test_reanchor_persists_override_and_survives_restart():
+    """La date cible posée au ré-ancrage est persistée et reprise après redémarrage.
+
+    Sans persistance, le « dans N jours » obtenu au ré-ancrage était perdu au
+    redémarrage (retour au cycle stable). On vérifie ici qu'il survit.
+    """
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    config = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: 3}
+    )
+    config.update_last_watering_date("2026-06-04")
+
+    hass = MagicMock()
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
+
+    # Ré-ancrage à 10:00 → cible 08/06 06:00, persistée dans l'override.
+    target = scheduler._compute_next_trigger(
+        datetime(2026, 6, 4, 10, 0, 0, tzinfo=timezone.utc), 6, 0, reanchor=True
+    )
+    config.set_next_watering_override(target.isoformat())
+    assert config.next_watering_override is not None
+
+    # Round-trip storage (redémarrage).
+    restored = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: 3}
+    )
+    restored.restore_from_storage(config.to_storage("2026-06-04"), "2026-06-04")
+    assert restored.next_watering_override == target.isoformat()
+
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler2 = IrrigationScheduler(hass, restored, AsyncMock(), AsyncMock())
+
+    # Redémarrage le 06/06 sans ré-ancrage : la cible persistée (08/06) prime.
+    now = datetime(2026, 6, 6, 8, 0, 0, tzinfo=timezone.utc)
+    result = scheduler2._compute_next_trigger(now, 6, 0, reanchor=False)
+    assert result.date() == date(2026, 6, 8)
+
+
+def test_real_watering_clears_override():
+    """Un arrosage réel efface la date cible : le cycle stable reprend la main."""
+    config = _make_state()
+    config.set_next_watering_override("2026-06-08T06:00:00+00:00")
+    assert config.next_watering_override is not None
+
+    config.update_last_watering_date("2026-06-08")
+
+    assert config.next_watering_override is None
+    assert config.last_auto_watering_date == "2026-06-08"

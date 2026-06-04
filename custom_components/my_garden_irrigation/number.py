@@ -1,9 +1,9 @@
 """Plateforme number — My Garden Irrigation.
 
-Seules les entités pilotées UNIQUEMENT par l'utilisateur via l'interface
-(NbPlantsNumber, DensityNumber) héritent de RestoreEntity — conformément
-au CDC (Module 1). Les entités de configuration globale lisent leur valeur
-depuis le coordinateur, lui-même initialisé depuis entry.options au démarrage.
+Toutes les entités lisent leur valeur depuis le coordinateur, source unique
+de vérité. Les champs par culture (nb_plants, densité) sont persistés dans le
+Store HA via PersistenceManager et restaurés au boot avant la création des
+entités — plus aucune dépendance à RestoreEntity (persistance dédoublée).
 """
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_CROP_ID,
@@ -50,11 +49,11 @@ async def async_setup_entry(
 
 
 # ---------------------------------------------------------------------------
-# Entités par culture — RestoreEntity (valeurs modifiables sans passer par
-# le formulaire de config, donc non présentes dans entry.options)
+# Entités par culture — vues fines sur le coordinateur. Les valeurs sont
+# persistées dans le Store HA et restaurées au boot (plus de RestoreEntity).
 # ---------------------------------------------------------------------------
 
-class NbPlantsNumber(NumberEntity, RestoreEntity):
+class NbPlantsNumber(NumberEntity):
     """Contrôle le nombre de plants d'une culture."""
 
     _attr_has_entity_name = True
@@ -73,32 +72,19 @@ class NbPlantsNumber(NumberEntity, RestoreEntity):
     ) -> None:
         self._coordinator = coordinator
         self._crop_id: str = crop[CONF_CROP_ID]
-        self._value: float = float(crop[CONF_NB_PLANTS])
         self._attr_unique_id = f"{entry.entry_id}_{self._crop_id}_nb_plants"
         self._attr_device_info = _plant_device_info(entry, crop)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            try:
-                self._value = float(last.state)
-            except ValueError:
-                pass
-        self._coordinator.update_crop_field(self._crop_id, CONF_NB_PLANTS, int(self._value))
-        await self._coordinator.async_request_refresh()
-
     @property
     def native_value(self) -> float:
-        return self._value
+        return float(self._coordinator.config.get_crop_field(self._crop_id, CONF_NB_PLANTS, 0))
 
     async def async_set_native_value(self, value: float) -> None:
-        self._value = value
-        self.async_write_ha_state()
         await self._coordinator.async_update_crop_field(self._crop_id, CONF_NB_PLANTS, int(value))
+        self.async_write_ha_state()
 
 
-class DensityNumber(NumberEntity, RestoreEntity):
+class DensityNumber(NumberEntity):
     """Contrôle la densité de plantation d'une culture (plants/m²)."""
 
     _attr_has_entity_name = True
@@ -117,29 +103,16 @@ class DensityNumber(NumberEntity, RestoreEntity):
     ) -> None:
         self._coordinator = coordinator
         self._crop_id: str = crop[CONF_CROP_ID]
-        self._value: float = float(crop[CONF_DENSITY])
         self._attr_unique_id = f"{entry.entry_id}_{self._crop_id}_density"
         self._attr_device_info = _plant_device_info(entry, crop)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in ("unknown", "unavailable"):
-            try:
-                self._value = float(last.state)
-            except ValueError:
-                pass
-        self._coordinator.update_crop_field(self._crop_id, CONF_DENSITY, round(self._value, 1))
-        await self._coordinator.async_request_refresh()
-
     @property
     def native_value(self) -> float:
-        return self._value
+        return float(self._coordinator.config.get_crop_field(self._crop_id, CONF_DENSITY, 0.0))
 
     async def async_set_native_value(self, value: float) -> None:
-        self._value = round(value, 1)
+        await self._coordinator.async_update_crop_field(self._crop_id, CONF_DENSITY, round(value, 1))
         self.async_write_ha_state()
-        await self._coordinator.async_update_crop_field(self._crop_id, CONF_DENSITY, self._value)
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from .const import (
     CONF_IRRIGATION_TIME,
     CONF_NB_PLANTS,
     CONF_SOAK_DURATION,
+    CONF_STAGE,
     CONF_WATERING_FREQUENCY,
     CONF_WATERING_INTERVAL_DAYS,
     CONF_WATERING_MODE,
@@ -50,15 +51,31 @@ _RUNTIME_CONFIG_KEYS = (
     CONF_SOAK_DURATION,
 )
 
+# Champs par culture pilotables par l'utilisateur via l'UI (number/select).
+# Persistés dans le Store HA (plus de RestoreEntity) et restaurés au boot.
+_CROP_OVERRIDE_FIELDS = (CONF_NB_PLANTS, CONF_DENSITY, CONF_STAGE)
+
+
+def _crops_snapshot(options: dict) -> dict:
+    """Snapshot des champs pilotables par culture, tel que défini par le formulaire."""
+    return {
+        crop[CONF_CROP_ID]: {f: crop.get(f) for f in _CROP_OVERRIDE_FIELDS}
+        for crop in options.get(CONF_CROPS, [])
+        if CONF_CROP_ID in crop
+    }
+
 
 def _options_hash(options: dict) -> str:
-    """Hash stable des clés de config globale.
+    """Hash stable des clés de config (globale + cultures du formulaire).
 
     Détecte si entry.options a changé depuis le dernier save runtime
-    (i.e. l'utilisateur a soumis le formulaire entre-temps).
-    Si le hash diffère, les overrides entity sont ignorés.
+    (i.e. l'utilisateur a soumis le formulaire entre-temps). Inclut les
+    valeurs par culture du formulaire : ainsi une re-soumission qui modifie
+    une culture invalide les overrides entity obsolètes (le formulaire fait
+    autorité). Si le hash diffère, les overrides entity sont ignorés.
     """
     relevant = {k: options.get(k) for k in _RUNTIME_CONFIG_KEYS}
+    relevant["crops"] = _crops_snapshot(options)
     return hashlib.md5(
         json.dumps(relevant, sort_keys=True, default=str).encode()
     ).hexdigest()
@@ -76,8 +93,12 @@ class RuntimeConfigState:
         self._options = options
 
         # Config depuis entry.options (vérités initiales, remplacées par les
-        # overrides runtime si l'options_hash est cohérent au chargement)
-        self._crop_data: list[dict] = list(options.get(CONF_CROPS, []))
+        # overrides runtime si l'options_hash est cohérent au chargement).
+        # Copie profonde des cultures : les mutations UI (update_crop_field) ne
+        # doivent pas altérer entry.options, qui sert de snapshot stable au hash.
+        self._crop_data: list[dict] = [
+            dict(crop) for crop in options.get(CONF_CROPS, [])
+        ]
         self._flow_rate: float = float(options.get(CONF_GLOBAL_FLOW_RATE, 0.0))
         self._watering_interval_days: int = int(
             options.get(CONF_WATERING_INTERVAL_DAYS, 2)
@@ -101,6 +122,10 @@ class RuntimeConfigState:
         # État arrosage automatique
         self._auto_enabled: bool = False
         self._last_auto_watering_date: str | None = None
+        # Date cible du prochain arrosage en mode interval, posée lors d'un
+        # ré-ancrage explicite (changement d'intervalle/fréquence). Persistée pour
+        # survivre aux redémarrages ; effacée dès qu'un arrosage réel a lieu.
+        self._next_watering_override: str | None = None
 
         # Temps d'ouverture de la vanne (persisté pour réconciliation au redémarrage)
         self._valve_open_time: datetime | None = None
@@ -133,6 +158,7 @@ class RuntimeConfigState:
 
         self._auto_enabled = stored.get("auto_irrigation_enabled", False)
         self._last_auto_watering_date = stored.get("last_auto_watering_date")
+        self._next_watering_override = stored.get("next_watering_override")
 
         valve_open_time_str: str | None = stored.get("valve_open_time")
         if valve_open_time_str:
@@ -154,7 +180,21 @@ class RuntimeConfigState:
                 self._cycles_count = int(runtime[CONF_CYCLES_COUNT])
             if CONF_SOAK_DURATION in runtime:
                 self._soak_duration_minutes = int(runtime[CONF_SOAK_DURATION])
+            # Overrides par culture (nb_plants/densité/stade pilotés via l'UI).
+            # Même garde options_hash : si le formulaire a été re-soumis, ces
+            # overrides sont obsolètes et entry.options fait autorité.
+            self._restore_crop_overrides(stored.get("crop_overrides", {}))
             _LOGGER.debug("RuntimeConfigState : runtime config restauré depuis le Store.")
+
+    def _restore_crop_overrides(self, overrides: dict) -> None:
+        """Ré-applique les valeurs par culture persistées dans la copie mémoire."""
+        for crop in self._crop_data:
+            crop_override = overrides.get(crop.get(CONF_CROP_ID))
+            if not crop_override:
+                continue
+            for field in _CROP_OVERRIDE_FIELDS:
+                if field in crop_override:
+                    crop[field] = crop_override[field]
 
     def to_storage(self, now_date_iso: str) -> dict:
         """Sérialise l'état complet pour le Store HA."""
@@ -164,9 +204,17 @@ class RuntimeConfigState:
             "watering_date": now_date_iso,
             "auto_irrigation_enabled": self._auto_enabled,
             "last_auto_watering_date": self._last_auto_watering_date,
+            "next_watering_override": self._next_watering_override,
             "valve_open_time": (
                 self._valve_open_time.isoformat() if self._valve_open_time else None
             ),
+            "crop_overrides": {
+                crop[CONF_CROP_ID]: {
+                    f: crop[f] for f in _CROP_OVERRIDE_FIELDS if f in crop
+                }
+                for crop in self._crop_data
+                if CONF_CROP_ID in crop
+            },
             "runtime_config": {
                 "options_hash": _options_hash(self._options),
                 CONF_GLOBAL_FLOW_RATE: self._flow_rate,
@@ -202,6 +250,10 @@ class RuntimeConfigState:
     @property
     def last_auto_watering_date(self) -> str | None:
         return self._last_auto_watering_date
+
+    @property
+    def next_watering_override(self) -> str | None:
+        return self._next_watering_override
 
     @property
     def flow_rate(self) -> float:
@@ -245,6 +297,13 @@ class RuntimeConfigState:
             if crop[CONF_CROP_ID] == crop_id:
                 crop[field] = value
                 return
+
+    def get_crop_field(self, crop_id: str, field: str, default: object = None) -> object:
+        """Lit un champ d'une culture depuis la copie en mémoire (source unique)."""
+        for crop in self._crop_data:
+            if crop[CONF_CROP_ID] == crop_id:
+                return crop.get(field, default)
+        return default
 
     def set_flow_rate(self, value: float) -> None:
         self._flow_rate = max(0.0, float(value))
@@ -291,6 +350,12 @@ class RuntimeConfigState:
 
     def update_last_watering_date(self, date_iso: str) -> None:
         self._last_auto_watering_date = date_iso
+        # Un arrosage réel a eu lieu : le cycle régulier reprend la main, la cible
+        # de ré-ancrage n'est plus pertinente.
+        self._next_watering_override = None
+
+    def set_next_watering_override(self, value: str | None) -> None:
+        self._next_watering_override = value
 
     def scale_cumulative_need(self, crop_id: str, scale: float) -> None:
         """Rescale proportionnellement le besoin cumulé d'une culture.
