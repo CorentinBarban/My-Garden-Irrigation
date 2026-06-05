@@ -1,7 +1,7 @@
 # 023 — Template Method : Algorithme de clôture comptable de minuit
 
 **Date** : 2026-06-03  
-**Statut** : Proposé  
+**Statut** : Proposé — **amendé par ADR-028** (clôture sans plancher : le bilan signé du jour peut reporter une réserve)  
 **Décideurs** : Équipe projet
 
 ---

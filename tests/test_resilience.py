@@ -24,6 +24,7 @@ from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.my_garden_irrigation.config_state import RuntimeConfigState
+from custom_components.my_garden_irrigation.coordinator import _LOGGER as _COORD_LOGGER
 from custom_components.my_garden_irrigation.core.journal import DailyWaterLedger
 from custom_components.my_garden_irrigation.const import (
     CONF_CROPS,
@@ -183,6 +184,7 @@ def test_fire_irrigation_event_cycles_count_zero_no_crash():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         data = MagicMock()
         hass = MagicMock()
         _entry = MagicMock()
@@ -199,6 +201,7 @@ def test_fire_irrigation_event_cycles_count_zero_no_crash():
             self.data = MagicMock()
             self.data.cumulative_need = {"c1": 10.0}
             self.data.total_daily_need_liters = 0.0
+            self.data.total_daily_balance_liters = 0.0
 
         def _resolve_watering_strategy(self):
             return IrrigationCoordinator._resolve_watering_strategy(self)
@@ -214,6 +217,7 @@ def test_fire_irrigation_event_cycles_payload_uses_max():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         hass = MagicMock()
         _entry = MagicMock()
         _entry.entry_id = "test"
@@ -228,6 +232,7 @@ def test_fire_irrigation_event_cycles_payload_uses_max():
             self.data = MagicMock()
             self.data.cumulative_need = {"c1": 6.0}
             self.data.total_daily_need_liters = 0.0
+            self.data.total_daily_balance_liters = 0.0
 
         def _resolve_watering_strategy(self):
             return IrrigationCoordinator._resolve_watering_strategy(self)
@@ -250,6 +255,7 @@ def test_on_midnight_replays_ledger_even_when_data_none():
     from custom_components.my_garden_irrigation.core.journal import WaterSource
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         data = None
 
         def __init__(self) -> None:
@@ -282,6 +288,7 @@ def test_on_midnight_empty_ledger_no_transfer():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         data = None
 
         def __init__(self) -> None:
@@ -313,6 +320,7 @@ def test_async_save_logs_warning_on_exception(caplog):
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         def __init__(self) -> None:
             self.config = _make_state()
             self._persistence = MagicMock()
@@ -348,6 +356,7 @@ def test_async_update_data_caches_daily_needs():
     fake_data.crops = {"c1": crop_result}
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _last_daily_needs: dict = {}
 
         def __init__(self) -> None:
@@ -550,6 +559,7 @@ def test_async_update_nb_plants_scales_cumulative():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         def __init__(self) -> None:
             self.config = RuntimeConfigState(_crop_options(nb_plants=10, density=2.0))
             # Surface initiale = 10/2 = 5 m² → cumulatif de départ = 20 L
@@ -578,6 +588,7 @@ def test_async_update_density_scales_cumulative():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         def __init__(self) -> None:
             self.config = RuntimeConfigState(_crop_options(nb_plants=10, density=2.0))
             self.config._cumulative_need = {"c1": 20.0}
@@ -604,6 +615,7 @@ def test_async_update_stage_no_cumulative_scaling():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         def __init__(self) -> None:
             self.config = RuntimeConfigState(_crop_options())
             self.config._cumulative_need = {"c1": 20.0}
@@ -631,6 +643,7 @@ def test_async_update_no_cumulative_when_zero_old_surface():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         def __init__(self) -> None:
             # density=0 n'est pas permis via le formulaire, mais on teste la robustesse
             from custom_components.my_garden_irrigation.config_state import RuntimeConfigState as RCS
@@ -862,10 +875,11 @@ def test_cleanup_removes_irrigation_sensor_no_suffix():
 # ---------------------------------------------------------------------------
 
 def test_on_trigger_no_date_update_when_data_unavailable():
-    """Règle 3 spec : si data is None (météo indispo), la date NE doit PAS être mise à jour."""
+    """Si data is None (météo indispo), la date NE doit PAS être mise à jour."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         data = None          # données météo indisponibles
         _date_updated = False
 
@@ -874,12 +888,6 @@ def test_on_trigger_no_date_update_when_data_unavailable():
 
         async def update_last_watering_date(self, date_iso: str) -> None:
             FakeCoord._date_updated = True
-
-        async def _on_interval_reached_calendar(self, date_iso: str) -> None:
-            await IrrigationCoordinator._on_interval_reached_calendar(self, date_iso)
-
-        async def _on_interval_reached_agronomic(self) -> None:
-            await IrrigationCoordinator._on_interval_reached_agronomic(self)
 
     coord = FakeCoord()
     _run(IrrigationCoordinator._on_trigger(coord, "2026-06-01"))
@@ -894,6 +902,7 @@ def test_on_trigger_updates_date_when_event_fired():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _date_updated = False
         _persistence = MagicMock()
         _persistence.async_save = AsyncMock()
@@ -908,43 +917,33 @@ def test_on_trigger_updates_date_when_event_fired():
         async def update_last_watering_date(self, date_iso: str) -> None:
             FakeCoord._date_updated = True
 
-        async def _on_interval_reached_calendar(self, date_iso: str) -> None:
-            await IrrigationCoordinator._on_interval_reached_calendar(self, date_iso)
-
-        async def _on_interval_reached_agronomic(self) -> None:
-            await IrrigationCoordinator._on_interval_reached_agronomic(self)
-
     coord = FakeCoord()
     _run(IrrigationCoordinator._on_trigger(coord, "2026-06-01"))
 
     assert coord._date_updated
 
 
-def test_on_trigger_updates_date_even_when_volume_zero():
-    """Règle 3 spec : si data dispo mais besoin=0 (pluie), la date DOIT être mise à jour."""
+def test_on_trigger_no_reanchor_when_volume_zero():
+    """ADR-028 : si data dispo mais aucun arrosage émis (réserve/pluie), le cycle n'est PAS réancré."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _date_updated = False
         data = MagicMock()   # données disponibles
 
         def fire_irrigation_event(self) -> bool:
-            return False     # volume nul — annulation agronomique (pluie)
+            return False     # volume nul — réserve ou pluie
 
         async def update_last_watering_date(self, date_iso: str) -> None:
             FakeCoord._date_updated = True
 
-        async def _on_interval_reached_calendar(self, date_iso: str) -> None:
-            await IrrigationCoordinator._on_interval_reached_calendar(self, date_iso)
-
-        async def _on_interval_reached_agronomic(self) -> None:
-            await IrrigationCoordinator._on_interval_reached_agronomic(self)
-
     coord = FakeCoord()
     _run(IrrigationCoordinator._on_trigger(coord, "2026-06-01"))
 
-    assert coord._date_updated, (
-        "Règle 3 : la date doit être ancrée même si aucun litre n'est distribué (pluie)"
+    assert not coord._date_updated, (
+        "ADR-028 : sans arrosage réel, le cycle d'intervalle ne doit pas être réancré "
+        "(réévaluation le lendemain)"
     )
 
 
@@ -953,6 +952,7 @@ def test_fire_irrigation_event_returns_false_when_cumulative_zero():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         hass = MagicMock()
         _entry = MagicMock()
         _entry.entry_id = "test"
@@ -965,6 +965,7 @@ def test_fire_irrigation_event_returns_false_when_cumulative_zero():
             self.data = MagicMock()
             self.data.cumulative_need = {"c1": 0.0}
             self.data.total_daily_need_liters = 0.0
+            self.data.total_daily_balance_liters = 0.0
 
         def _resolve_watering_strategy(self):
             return IrrigationCoordinator._resolve_watering_strategy(self)
@@ -981,6 +982,7 @@ def test_fire_irrigation_event_returns_true_when_fired():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         hass = MagicMock()
         _entry = MagicMock()
         _entry.entry_id = "test"
@@ -990,6 +992,7 @@ def test_fire_irrigation_event_returns_true_when_fired():
             self.data = MagicMock()
             self.data.cumulative_need = {"c1": 10.0}
             self.data.total_daily_need_liters = 0.0
+            self.data.total_daily_balance_liters = 0.0
 
         def _resolve_watering_strategy(self):
             return IrrigationCoordinator._resolve_watering_strategy(self)
@@ -1098,6 +1101,7 @@ def test_set_flow_rate_notifies_listeners():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _save_calls: list = []
         _notify_calls: list = []
 
@@ -1124,6 +1128,7 @@ def test_set_watering_mode_notifies_listeners():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _notify_calls: list = []
 
         def __init__(self):
@@ -1147,6 +1152,7 @@ def test_notify_listeners_noop_when_no_data():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         data = None
         _listener_calls: list = []
 
@@ -1172,6 +1178,7 @@ def test_async_recompute_from_cache_uses_cached_weather():
     fake_data.crops = {}
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _last_weather = (3.5, 1.2)
         _last_daily_needs: dict = {}
 
@@ -1204,6 +1211,7 @@ def test_async_recompute_from_cache_noop_when_no_cache():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _last_weather = None
         _updated = False
 
@@ -1233,6 +1241,7 @@ def test_async_update_data_caches_last_weather():
     fake_data.crops = {}
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _last_daily_needs: dict = {}
 
         def __init__(self):
@@ -1308,27 +1317,28 @@ def test_async_update_crop_field_uses_scale_method():
 
 
 # ---------------------------------------------------------------------------
-# Règle 2 spec — volume inclusif pour arrosage tardif (Anomalie B)
+# ADR-028 — décision inclusive unique (volume = cumul + bilan net du jour)
 # ---------------------------------------------------------------------------
 
-def test_fire_irrigation_event_evening_includes_daily_need():
-    """Scénario II spec : arrosage 21h00 → volume = cumul + journalier."""
+def test_fire_irrigation_event_includes_daily_balance_evening():
+    """Arrosage 21h00 : volume = cumul(8) + bilan jour(4) = 12L."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     fired_payload: dict = {}
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _entry = MagicMock()
         _entry.entry_id = "test"
 
         def __init__(self):
             self.config = _make_state(**{
                 CONF_GLOBAL_FLOW_RATE: 300.0,
-                CONF_IRRIGATION_TIME: "21:00:00",   # arrosage tardif
+                CONF_IRRIGATION_TIME: "21:00:00",
             })
             self.data = MagicMock()
             self.data.cumulative_need = {"c1": 8.0}
-            self.data.total_daily_need_liters = 4.0
+            self.data.total_daily_balance_liters = 4.0
 
         @property
         def hass(self):
@@ -1345,29 +1355,28 @@ def test_fire_irrigation_event_evening_includes_daily_need():
     result = IrrigationCoordinator.fire_irrigation_event(coord)
 
     assert result is True
-    assert fired_payload.get("total_volume_liters") == pytest.approx(12.0), (
-        "Volume cible soir = cumul(8L) + journalier(4L) = 12L"
-    )
+    assert fired_payload.get("total_volume_liters") == pytest.approx(12.0)
 
 
-def test_fire_irrigation_event_morning_excludes_daily_need():
-    """Arrosage 06h00 : volume = cumul seulement (besoin journalier non inclus)."""
+def test_fire_irrigation_event_includes_daily_balance_morning():
+    """ADR-028 : le matin inclut AUSSI le bilan du jour → cumul(8) + jour(4) = 12L."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     fired_payload: dict = {}
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         _entry = MagicMock()
         _entry.entry_id = "test"
 
         def __init__(self):
             self.config = _make_state(**{
                 CONF_GLOBAL_FLOW_RATE: 300.0,
-                CONF_IRRIGATION_TIME: "06:00:00",   # arrosage matinal
+                CONF_IRRIGATION_TIME: "06:00:00",   # matin : même calcul inclusif
             })
             self.data = MagicMock()
             self.data.cumulative_need = {"c1": 8.0}
-            self.data.total_daily_need_liters = 4.0
+            self.data.total_daily_balance_liters = 4.0
 
         @property
         def hass(self):
@@ -1384,16 +1393,15 @@ def test_fire_irrigation_event_morning_excludes_daily_need():
     result = IrrigationCoordinator.fire_irrigation_event(coord)
 
     assert result is True
-    assert fired_payload.get("total_volume_liters") == pytest.approx(8.0), (
-        "Volume cible matin = cumul(8L) seulement"
-    )
+    assert fired_payload.get("total_volume_liters") == pytest.approx(12.0)
 
 
-def test_fire_irrigation_event_evening_zero_cumul_fires_if_daily_need():
-    """Soir + cumul=0 mais besoin journalier > 0 : l'arrosage doit quand même s'émettre."""
+def test_fire_irrigation_event_zero_cumul_fires_if_daily_balance():
+    """Cumul=0 mais bilan du jour > 0 : l'arrosage s'émet quand même (besoin du jour)."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         hass = MagicMock()
         _entry = MagicMock()
         _entry.entry_id = "test"
@@ -1405,7 +1413,7 @@ def test_fire_irrigation_event_evening_zero_cumul_fires_if_daily_need():
             })
             self.data = MagicMock()
             self.data.cumulative_need = {"c1": 0.0}
-            self.data.total_daily_need_liters = 4.0
+            self.data.total_daily_balance_liters = 4.0
 
         def _resolve_watering_strategy(self):
             return IrrigationCoordinator._resolve_watering_strategy(self)
@@ -1417,24 +1425,51 @@ def test_fire_irrigation_event_evening_zero_cumul_fires_if_daily_need():
     coord.hass.bus.async_fire.assert_called_once()
 
 
+def test_fire_irrigation_event_reserve_covers_need_no_fire():
+    """ADR-028 : réserve cumulée (cumul<0) qui couvre le bilan du jour → pas d'arrosage."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+
+    class FakeCoord:
+        _log = _COORD_LOGGER
+        hass = MagicMock()
+        _entry = MagicMock()
+        _entry.entry_id = "test"
+
+        def __init__(self):
+            self.config = _make_state(**{CONF_GLOBAL_FLOW_RATE: 300.0})
+            self.data = MagicMock()
+            self.data.cumulative_need = {"c1": -80.0}   # réserve
+            self.data.total_daily_balance_liters = 40.0  # besoin du jour < réserve
+
+        def _resolve_watering_strategy(self):
+            return IrrigationCoordinator._resolve_watering_strategy(self)
+
+    coord = FakeCoord()
+    result = IrrigationCoordinator.fire_irrigation_event(coord)
+
+    assert result is False
+    coord.hass.bus.async_fire.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
-# Règle 3 spec — immunisation calendrier (Anomalie C)
+# ADR-028 — réancrage du calendrier uniquement sur arrosage réel
 # ---------------------------------------------------------------------------
 
-def test_on_trigger_calendar_immune_to_rain():
-    """Scénario III spec : sol saturé (cumul=0) → date ancrée, calendrier préservé."""
+def test_on_trigger_no_reanchor_when_rain_covers_need():
+    """ADR-028 : sol saturé (aucun arrosage émis) → cycle NON réancré, réévaluation demain."""
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
     from custom_components.my_garden_irrigation.core.models import IrrigationData
 
     dates_saved: list[str] = []
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         def __init__(self):
             self.config = _make_state()
-            # Données disponibles mais besoin cumulé nul (pluie)
+            # Données disponibles mais aucun besoin net (pluie / réserve)
             self.data = IrrigationData(
                 cumulative_need={"c1": 0.0},
-                total_daily_need_liters=0.0,
+                total_daily_balance_liters=0.0,
             )
 
         def fire_irrigation_event(self) -> bool:
@@ -1443,18 +1478,37 @@ def test_on_trigger_calendar_immune_to_rain():
         async def update_last_watering_date(self, date_iso: str) -> None:
             dates_saved.append(date_iso)
 
-        async def _on_interval_reached_calendar(self, date_iso: str) -> None:
-            await IrrigationCoordinator._on_interval_reached_calendar(self, date_iso)
+    coord = FakeCoord()
+    _run(IrrigationCoordinator._on_trigger(coord, "2026-06-03"))
 
-        async def _on_interval_reached_agronomic(self) -> None:
-            await IrrigationCoordinator._on_interval_reached_agronomic(self)
+    assert dates_saved == [], (
+        "ADR-028 : sans arrosage réel, le cycle n'est pas réancré (réévaluation demain)"
+    )
+
+
+def test_on_trigger_reanchors_when_watering_fires():
+    """ADR-028 : un arrosage réel réancre le cycle (date avancée)."""
+    from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
+    from custom_components.my_garden_irrigation.core.models import IrrigationData
+
+    dates_saved: list[str] = []
+
+    class FakeCoord:
+        _log = _COORD_LOGGER
+        def __init__(self):
+            self.config = _make_state()
+            self.data = IrrigationData(cumulative_need={"c1": 10.0})
+
+        def fire_irrigation_event(self) -> bool:
+            return True   # arrosage émis
+
+        async def update_last_watering_date(self, date_iso: str) -> None:
+            dates_saved.append(date_iso)
 
     coord = FakeCoord()
     _run(IrrigationCoordinator._on_trigger(coord, "2026-06-03"))
 
-    assert dates_saved == ["2026-06-03"], (
-        "Règle 3 : la date doit être ancrée au Jour 3 même si 0 L distribués"
-    )
+    assert dates_saved == ["2026-06-03"]
 
 
 def test_on_trigger_no_calendar_skip_on_technical_failure():
@@ -1464,6 +1518,7 @@ def test_on_trigger_no_calendar_skip_on_technical_failure():
     dates_saved: list[str] = []
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         data = None
 
         def fire_irrigation_event(self) -> bool:
@@ -1471,12 +1526,6 @@ def test_on_trigger_no_calendar_skip_on_technical_failure():
 
         async def update_last_watering_date(self, date_iso: str) -> None:
             dates_saved.append(date_iso)
-
-        async def _on_interval_reached_calendar(self, date_iso: str) -> None:
-            await IrrigationCoordinator._on_interval_reached_calendar(self, date_iso)
-
-        async def _on_interval_reached_agronomic(self) -> None:
-            await IrrigationCoordinator._on_interval_reached_agronomic(self)
 
     coord = FakeCoord()
     _run(IrrigationCoordinator._on_trigger(coord, "2026-06-03"))
@@ -1583,6 +1632,7 @@ def test_set_watering_frequency_calls_reschedule():
     from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         config = _make_state()
         _scheduler = MagicMock()
         _reschedule_called = False
@@ -1605,6 +1655,7 @@ def test_set_watering_interval_days_calls_reschedule():
     from custom_components.my_garden_irrigation.coordinator import IrrigationCoordinator
 
     class FakeCoord:
+        _log = _COORD_LOGGER
         config = _make_state()
         _scheduler = MagicMock()
 

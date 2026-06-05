@@ -1,7 +1,7 @@
 # 019 — Imputation comptable réelle des volumes d'arrosage et préservation du déficit cumulé
 
 **Date** : 2026-06-01  
-**Statut** : Implémenté  
+**Statut** : Implémenté — **amendé par ADR-028** (plancher 0 retiré de `apply_watering_volumes` : un sur-arrosage crée une réserve)  
 **Décideurs** : Équipe projet
 
 ---

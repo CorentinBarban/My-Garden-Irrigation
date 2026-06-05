@@ -44,6 +44,7 @@ from .core.calculations import compute_irrigation_data
 from .core.kc_data import get_kc
 from .core.models import IrrigationData
 from .kc_loader import async_load_kc_data
+from .logging_util import instance_logger
 from .persistence import PersistenceManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,10 +62,12 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=SCAN_INTERVAL)
+        log = instance_logger(_LOGGER, entry)
+        super().__init__(hass, log, name=DOMAIN, update_interval=SCAN_INTERVAL)
+        self._log = log
         self._entry = entry
         self.config = RuntimeConfigState.from_entry(entry)
-        self._persistence = PersistenceManager(hass, entry.entry_id)
+        self._persistence = PersistenceManager(hass, entry.entry_id, log)
         self._kc_data: dict = {}
         self._scheduler: Any = None
         self._last_daily_needs: dict[str, float] = {}
@@ -96,9 +99,11 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         if self.config.auto_irrigation_enabled and self.config.last_auto_watering_date is None:
             self.config.set_auto_irrigation(True, dt_util.now().date().isoformat())
 
-        tracker = ValveTracker(self.hass, self.config, self._on_volumes_applied)
+        tracker = ValveTracker(
+            self.hass, self.config, self._on_volumes_applied, self._log
+        )
         scheduler = IrrigationScheduler(
-            self.hass, self.config, self._on_midnight, self._on_trigger
+            self.hass, self.config, self._on_midnight, self._on_trigger, self._log
         )
         self._scheduler = scheduler
 
@@ -155,30 +160,26 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         await self.async_refresh()
 
     async def _on_trigger(self, date_iso: str) -> None:
-        """Dispatch vers les deux observateurs de l'intervalle (ADR-025)."""
-        await self._on_interval_reached_calendar(date_iso)   # Règle 3 — toujours
-        await self._on_interval_reached_agronomic()          # Règle 2+physique — conditionnel
+        """Évalue l'arrosage, puis réancre le cycle d'intervalle si — et seulement si —
+        un arrosage a été effectivement émis (ADR-028, remplace la Règle 3 d'ADR-025).
 
-    async def _on_interval_reached_calendar(self, date_iso: str) -> None:
-        """Avance la date du dernier arrosage quand l'intervalle est atteint (Règle 3).
-
-        N'avance la date que si les données météo sont disponibles ; sinon le
-        calendrier reste en place pour réessayer le lendemain.
+        Un saut (réserve cumulée ou pluie qui annule le besoin du jour) ne réancre PAS
+        le cycle : le planificateur réévalue dès le lendemain jusqu'à ce qu'un arrosage
+        réel ait lieu. Sans données météo, tout est reporté au lendemain.
         """
         if self.data is None:
-            _LOGGER.warning(
-                "Données météo indisponibles — calendrier non avancé, nouvelle tentative demain."
+            self._log.warning(
+                "Données météo indisponibles — arrosage et calendrier reportés, "
+                "nouvelle tentative demain."
             )
             return
-        await self.update_last_watering_date(date_iso)
-
-    async def _on_interval_reached_agronomic(self) -> None:
-        """Évalue le besoin et commande la vanne si nécessaire — conditionnellement."""
-        if self.data is None:
-            return
-        fired = self.fire_irrigation_event()
-        if not fired:
-            _LOGGER.info("Besoin nul (pluie ?) — passage du tour, calendrier déjà avancé.")
+        if self.fire_irrigation_event():
+            await self.update_last_watering_date(date_iso)
+        else:
+            self._log.info(
+                "Aucun arrosage (réserve suffisante ou pluie) — cycle non réancré, "
+                "réévaluation demain."
+            )
 
     # ------------------------------------------------------------------
     # API publique — appelée par les entités HA
@@ -189,6 +190,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self, crop_id: str, field: str, value: object
     ) -> None:
         """Action utilisateur : met à jour un champ, rescale le cumulatif, rafraîchit."""
+        self._log.debug("Réglage culture %s : %s = %s", crop_id, field, value)
         if field in _SURFACE_FIELDS and crop_id in self.config.cumulative_need:
             old_surface = self.config.get_crop_surfaces().get(crop_id, 0.0)
             self.config.update_crop_field(crop_id, field, value)
@@ -202,11 +204,13 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         await self.async_refresh()
 
     def set_flow_rate(self, value: float) -> None:
+        self._log.debug("Réglage débit global = %s L/h", value)
         self.config.set_flow_rate(value)
         self._schedule_config_save()
         self._notify_listeners()
 
     def set_watering_interval_days(self, value: int) -> None:
+        self._log.debug("Réglage intervalle d'arrosage = %s j", value)
         self.config.set_watering_interval_days(value)
         if self._scheduler is not None:
             # Ré-ancrage : l'utilisateur change l'intervalle → prochain arrosage
@@ -216,6 +220,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self._notify_listeners()
 
     def set_watering_frequency(self, value: str) -> None:
+        self._log.debug("Réglage fréquence d'arrosage = %s", value)
         self.config.set_watering_frequency(value)
         if self._scheduler is not None:
             self._scheduler.reschedule_auto_irrigation(reanchor=True)
@@ -223,11 +228,13 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self._notify_listeners()
 
     def set_watering_mode(self, value: str) -> None:
+        self._log.debug("Réglage mode d'arrosage = %s", value)
         self.config.set_watering_mode(value)
         self._schedule_config_save()
         self._notify_listeners()
 
     def set_irrigation_time(self, value: str) -> None:
+        self._log.debug("Réglage heure d'arrosage = %s", value)
         self.config.set_irrigation_time(value)
         if self._scheduler is not None:
             self._scheduler.reschedule_auto_irrigation()
@@ -235,16 +242,19 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         self._notify_listeners()
 
     def set_cycles_count(self, value: int) -> None:
+        self._log.debug("Réglage nombre de cycles = %s", value)
         self.config.set_cycles_count(value)
         self._schedule_config_save()
         self._notify_listeners()
 
     def set_soak_duration_minutes(self, value: int) -> None:
+        self._log.debug("Réglage durée de repos = %s min", value)
         self.config.set_soak_duration_minutes(value)
         self._schedule_config_save()
         self._notify_listeners()
 
     async def async_set_auto_irrigation(self, enabled: bool) -> None:
+        self._log.info("Arrosage automatique %s.", "activé" if enabled else "désactivé")
         self.config.set_auto_irrigation(enabled, dt_util.now().date().isoformat())
         await self._async_save()
         if self._scheduler is not None:
@@ -252,6 +262,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         await self.async_refresh()
 
     async def async_reset_irrigation(self) -> None:
+        self._log.info("Réinitialisation du bilan hydrique cumulé (action utilisateur).")
         self.config.reset_irrigation()
         self._daily_ledger = DailyWaterLedger()
         await self._async_save()
@@ -280,7 +291,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         """
         data = self.data
         if data is None:
-            _LOGGER.warning(
+            self._log.warning(
                 "Arrosage impossible : les données météo ne sont pas encore disponibles. "
                 "Attendez le premier cycle de mise à jour (toutes les heures) avant de déclencher l'arrosage."
             )
@@ -288,26 +299,26 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
 
         total_cumulative = sum(data.cumulative_need.values())
 
-        # La stratégie choisit le volume cible selon l'heure d'arrosage (ADR-024).
+        # Décision inclusive (ADR-028) : dette/réserve cumulée + bilan net du jour.
+        # Le bilan du jour peut être négatif (surplus de pluie) et la réserve cumulée
+        # négative — le volume cible plafonné à 0 annule alors l'arrosage.
         strategy = self._resolve_watering_strategy()
         total_volume = strategy.calculate_target_volume(
-            total_cumulative, data.total_daily_need_liters
+            total_cumulative, data.total_daily_balance_liters
         )
-        is_evening = total_volume > total_cumulative
 
         if total_volume <= 0:
-            _LOGGER.debug(
-                "Arrosage auto : volume cible = 0 L (cumulé=%.1fL, journalier=%.1fL, mode=%s) — "
-                "événement non émis.",
+            self._log.debug(
+                "Arrosage auto : volume cible ≤ 0 L (cumulé=%.1fL, bilan jour=%.1fL) — "
+                "réserve suffisante, événement non émis.",
                 total_cumulative,
-                data.total_daily_need_liters,
-                "soir" if is_evening else "matin",
+                data.total_daily_balance_liters,
             )
             return False
 
         flow_rate = self.config.flow_rate
         if flow_rate <= 0:
-            _LOGGER.warning(
+            self._log.warning(
                 "Arrosage auto : débit non configuré (%.1f L/h) — événement non émis.",
                 flow_rate,
             )
@@ -338,13 +349,13 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         # de fermetures que de cycles (le ValveTracker ne comptabilise qu'à la dernière).
         self.config.begin_irrigation_session(plan.cycles_count if is_fractioned else 1)
         self.hass.bus.async_fire(f"{DOMAIN}_irrigation_requested", payload)
-        _LOGGER.info(
+        self._log.info(
             "Événement %s_irrigation_requested émis — volume=%.1fL "
-            "(cumulé=%.1fL%s), durée=%.1f min, mode=%s.",
+            "(cumulé=%.1fL + bilan jour=%.1fL), durée=%.1f min, mode=%s.",
             DOMAIN,
             total_volume,
             total_cumulative,
-            f" + journalier={data.total_daily_need_liters:.1f}L" if is_evening else "",
+            data.total_daily_balance_liters,
             plan.duration_minutes,
             self.config.watering_mode,
         )
@@ -361,7 +372,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             self._last_weather = (eto_mm, precipitation_mm)
         except UpdateFailed as exc:
             if self.data is not None:
-                _LOGGER.warning(
+                self._log.warning(
                     "Open-Meteo inaccessible, nouvelle tentative dans %d min : %s",
                     WEATHER_RETRY_INTERVAL.seconds // 60,
                     exc,
@@ -382,8 +393,10 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         )
         now = dt_util.now()
         self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
-        for crop_id, need in self._last_daily_needs.items():
-            self._daily_ledger.set_daily_need(crop_id, need, now)
+        # Le journal porte le bilan hydrique signé du jour (ADR-028) — distinct du
+        # besoin affiché (≥ 0) ; un surplus de pluie (valeur négative) alimente la réserve.
+        for crop_id, result in data.crops.items():
+            self._daily_ledger.set_daily_need(crop_id, result.daily_balance_liters, now)
         return data
 
     async def _async_recompute_from_cache(self) -> None:
@@ -407,8 +420,10 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         )
         now = dt_util.now()
         self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
-        for crop_id, need in self._last_daily_needs.items():
-            self._daily_ledger.set_daily_need(crop_id, need, now)
+        # Le journal porte le bilan hydrique signé du jour (ADR-028) — distinct du
+        # besoin affiché (≥ 0) ; un surplus de pluie (valeur négative) alimente la réserve.
+        for crop_id, result in data.crops.items():
+            self._daily_ledger.set_daily_need(crop_id, result.daily_balance_liters, now)
         self.async_set_updated_data(data)
 
     @callback
@@ -436,7 +451,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         """Appelle Open-Meteo pour obtenir l'ETo et les précipitations du jour."""
         lat = self.hass.config.latitude
         lon = self.hass.config.longitude
-        _LOGGER.debug("Récupération météo Open-Meteo (lat=%s, lon=%s)", lat, lon)
+        self._log.debug("Récupération météo Open-Meteo (lat=%s, lon=%s)", lat, lon)
 
         session = async_get_clientsession(self.hass)
         params = {
@@ -459,7 +474,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             except aiohttp.ClientResponseError as exc:
                 if exc.status in (502, 503, 504) and attempt < 2:
                     delay = 10 * (attempt + 1)
-                    _LOGGER.warning(
+                    self._log.warning(
                         "Open-Meteo indisponible (HTTP %s), nouvelle tentative dans %ds (%d/3)…",
                         exc.status,
                         delay,
@@ -491,7 +506,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             raise UpdateFailed("L'ETo retourné par Open-Meteo est None.")
 
         precipitation_mm = float(precipitation_mm) if precipitation_mm is not None else 0.0
-        _LOGGER.debug(
+        self._log.debug(
             "Open-Meteo — ETo=%.2f mm/j, précipitations=%.2f mm",
             float(eto_mm),
             precipitation_mm,
@@ -520,7 +535,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         try:
             await self._persistence.async_save(self._build_storage())
         except Exception as exc:
-            _LOGGER.warning("Échec de la sauvegarde de l'état : %s", exc)
+            self._log.warning("Échec de la sauvegarde de l'état : %s", exc)
 
     @callback
     def _notify_listeners(self) -> None:

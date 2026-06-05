@@ -1,7 +1,7 @@
 # 008 — Persistence du Bilan Hydrique Cumulé (Gestion du déficit en eau)
 
 **Date** : 2026-05-30  
-**Statut** : Proposé  
+**Statut** : Proposé — **amendé par ADR-028** (le bilan cumulé devient signé : négatif = réserve de pluie)  
 **Décideurs** : Expert Home Assistant / Équipe projet  
 
 ---

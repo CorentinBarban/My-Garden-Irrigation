@@ -36,15 +36,29 @@ def compute_effective_rainfall_mm(precipitation_mm: float) -> float:
     return precipitation_mm * EFFECTIVE_RAINFALL_FACTOR
 
 
+def compute_balance_liters(etc_liters: float, effective_rainfall_mm: float, surface_m2: float) -> float:
+    """Bilan hydrique signé du jour en litres (ADR-028).
+
+    Bilan (mm) = ETc_mm − Pluie Efficace_mm   (peut être négatif = surplus de pluie)
+    Converti en litres : × surface_m2
+
+    Contrairement à compute_net_liters, ce bilan n'est PAS planché : un surplus de
+    pluie produit une valeur négative qui alimente la réserve hydrique cumulée.
+    """
+    etc_mm = etc_liters / surface_m2 if surface_m2 else 0.0
+    return (etc_mm - effective_rainfall_mm) * surface_m2
+
+
 def compute_net_liters(etc_liters: float, effective_rainfall_mm: float, surface_m2: float) -> float:
     """Besoin net en litres après déduction de la pluie efficace (ADR-007).
 
     Besoin Net (mm) = max(0, ETc_mm − Pluie Efficace_mm)
     Converti en litres : × surface_m2
+
+    Valeur d'affichage plancher 0 ; la version signée pour la comptabilité est
+    fournie par compute_balance_liters.
     """
-    etc_mm = etc_liters / surface_m2 if surface_m2 else 0.0
-    net_mm = max(0.0, etc_mm - effective_rainfall_mm)
-    return net_mm * surface_m2
+    return max(0.0, compute_balance_liters(etc_liters, effective_rainfall_mm, surface_m2))
 
 
 def compute_crop_result(
@@ -65,7 +79,8 @@ def compute_crop_result(
     surface_m2 = compute_surface_m2(nb_plants, density)
     etc_liters = compute_etc_liters(kc, eto_mm, surface_m2)
     effective_rainfall_mm = compute_effective_rainfall_mm(precipitation_mm)
-    net_liters = compute_net_liters(etc_liters, effective_rainfall_mm, surface_m2)
+    balance_liters = compute_balance_liters(etc_liters, effective_rainfall_mm, surface_m2)
+    net_liters = max(0.0, balance_liters)
     daily_need_liters = net_liters
     return CropResult(
         liters=round(net_liters, 1),
@@ -82,6 +97,7 @@ def compute_crop_result(
         density=density,
         watering_applied_today_liters=round(watering_applied_today_liters, 1),
         daily_need_liters=round(daily_need_liters, 1),
+        daily_balance_liters=round(balance_liters, 1),
     )
 
 
@@ -119,6 +135,7 @@ def compute_irrigation_data(
     results: dict[str, CropResult] = {}
     total = 0.0
     total_daily_need = 0.0
+    total_daily_balance = 0.0
 
     for crop in crops:
         crop_id: str = crop["crop_id"]
@@ -144,11 +161,13 @@ def compute_irrigation_data(
         results[crop_id] = result
         total += result.liters
         total_daily_need += result.daily_need_liters
+        total_daily_balance += result.daily_balance_liters
 
     return IrrigationData(
         crops=results,
         total_liters=round(total, 1),
         total_daily_need_liters=round(total_daily_need, 1),
+        total_daily_balance_liters=round(total_daily_balance, 1),
         eto_mm=eto_mm,
         precipitation_mm=precipitation_mm,
         cumulative_need=dict(_cumulative),

@@ -357,11 +357,16 @@ class RuntimeConfigState:
     # ------------------------------------------------------------------
 
     def apply_watering_volumes(self, volumes: dict[str, float]) -> None:
-        """Soustrait du bilan cumulé les volumes distribués par culture (plancher 0)."""
+        """Soustrait du bilan cumulé signé les volumes distribués par culture (ADR-028).
+
+        Sans plancher : un arrosage supérieur à la dette crée une réserve (cumulé
+        négatif). C'est le seul point d'imputation de l'arrosage sur le cumulé — le
+        journal de minuit l'exclut pour éviter un double comptage.
+        """
         for crop_id in self._get_crop_ids():
             current = self._cumulative_need.get(crop_id, 0.0)
             distributed = volumes.get(crop_id, 0.0)
-            self._cumulative_need[crop_id] = max(0.0, current - distributed)
+            self._cumulative_need[crop_id] = current - distributed
 
     def apply_midnight_result(self, new_cumulative: dict[str, float]) -> None:
         """Remplace le bilan cumulé par celui calculé à la clôture de minuit (ADR-023)."""

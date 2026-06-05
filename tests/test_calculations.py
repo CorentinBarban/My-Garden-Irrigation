@@ -4,6 +4,7 @@ Fonctions pures — aucune dépendance HA, aucun mock nécessaire.
 """
 import pytest
 from custom_components.my_garden_irrigation.core.calculations import (
+    compute_balance_liters,
     compute_crop_result,
     compute_effective_rainfall_mm,
     compute_etc_liters,
@@ -80,6 +81,28 @@ def test_net_liters_zero_surface():
 
 
 # ---------------------------------------------------------------------------
+# compute_balance_liters (signé, ADR-028)
+# ---------------------------------------------------------------------------
+
+def test_balance_liters_deficit_positive():
+    # ETc=20L sur 10m² = 2mm, pluie eff=1mm → (2-1)×10 = +10L (dette)
+    assert compute_balance_liters(20.0, 1.0, 10.0) == pytest.approx(10.0)
+
+def test_balance_liters_rain_surplus_negative():
+    # ETc=10L sur 10m² = 1mm, pluie eff=5mm → (1-5)×10 = −40L (surplus → réserve)
+    assert compute_balance_liters(10.0, 5.0, 10.0) == pytest.approx(-40.0)
+
+def test_balance_liters_no_eto_full_surplus():
+    # Besoin nul, 12mm de pluie efficace sur 6m² → −72L
+    assert compute_balance_liters(0.0, 12.0, 6.0) == pytest.approx(-72.0)
+
+def test_net_liters_is_floored_balance():
+    """compute_net_liters = max(0, compute_balance_liters)."""
+    assert compute_net_liters(10.0, 5.0, 10.0) == pytest.approx(0.0)
+    assert compute_balance_liters(10.0, 5.0, 10.0) == pytest.approx(-40.0)
+
+
+# ---------------------------------------------------------------------------
 # compute_crop_result
 # ---------------------------------------------------------------------------
 
@@ -111,6 +134,10 @@ def test_crop_result_with_rain():
     )
     assert result.liters == pytest.approx(0.0)
     assert result.effective_rainfall_mm == pytest.approx(16.0)
+    # daily_balance_liters reste signé : ETc 26.25L − pluie eff 16mm×5m²=80L → −53.75L
+    assert result.daily_balance_liters == pytest.approx(-53.8, abs=0.2)
+    # le besoin affiché reste planché à 0
+    assert result.daily_need_liters == pytest.approx(0.0)
 
 def test_crop_result_watering_applied_tracked_but_does_not_reduce_daily_need():
     """ADR-019 : daily_need_liters = net_liters indépendamment du volume arrosé.
@@ -213,6 +240,18 @@ def test_irrigation_data_empty_crops():
     )
     assert data.crops == {}
     assert data.total_liters == pytest.approx(0.0)
+
+def test_irrigation_data_total_balance_negative_on_rain():
+    """ADR-028 : total_daily_balance_liters peut être négatif (surplus de pluie) alors que
+    total_daily_need_liters (affiché) reste ≥ 0."""
+    # Forte pluie : besoin net affiché = 0, mais bilan signé négatif.
+    data = compute_irrigation_data(
+        crops=_CROPS, kc_data=_KC_DATA, eto_mm=0.0, precipitation_mm=20.0,
+        kc_getter=_kc_getter,
+    )
+    assert data.total_daily_need_liters == pytest.approx(0.0)
+    assert data.total_daily_balance_liters < 0.0
+
 
 def test_irrigation_data_cumulative_need_passthrough():
     cumulative = {"c1": 12.5, "c2": 7.0}

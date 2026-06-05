@@ -1,7 +1,7 @@
 # 021 — Conditionnement du calendrier d'intervalle à l'émission effective de l'événement
 
 **Date** : 2026-06-01  
-**Statut** : Obsolète — supersédé par ADR-025  
+**Statut** : Obsolète — supersédé par ADR-025, mais **principe réactivé par ADR-028** (réancrage sur arrosage réel, compatible avec la réserve hydrique signée)  
 **Décideurs** : Équipe projet
 
 ---

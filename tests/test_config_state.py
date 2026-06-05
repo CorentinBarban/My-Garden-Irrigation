@@ -206,13 +206,13 @@ def test_apply_watering_volumes_partial_reduces_deficit():
     state.apply_watering_volumes({"c1": 3.0})
     assert state.cumulative_need["c1"] == pytest.approx(7.0)
 
-def test_apply_watering_volumes_exceeds_deficit_clamps_to_zero():
-    """Volume distribué ≥ déficit : le cumulé est ramené à 0, pas en négatif."""
+def test_apply_watering_volumes_exceeds_deficit_creates_reserve():
+    """ADR-028 : volume distribué > déficit → le cumulé passe négatif (réserve), pas planché."""
     crops = [_crop("c1")]
     state = RuntimeConfigState(_options(**{CONF_CROPS: crops}))
     state._cumulative_need = {"c1": 2.0}
     state.apply_watering_volumes({"c1": 50.0})
-    assert state.cumulative_need["c1"] == pytest.approx(0.0)
+    assert state.cumulative_need["c1"] == pytest.approx(-48.0)
 
 def test_apply_watering_volumes_unwatered_crop_unchanged():
     """La culture non arrosée (absente du dict volumes) conserve son déficit intégralement."""

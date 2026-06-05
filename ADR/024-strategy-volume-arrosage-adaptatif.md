@@ -1,7 +1,7 @@
 # 024 — Strategy : Calcul adaptatif du volume d'arrosage (matin vs soir)
 
 **Date** : 2026-06-03  
-**Statut** : Proposé  
+**Statut** : **Remplacé par ADR-028** (décision de volume désormais toujours inclusive, sans distinction matin/soir)  
 **Décideurs** : Équipe projet
 
 ---

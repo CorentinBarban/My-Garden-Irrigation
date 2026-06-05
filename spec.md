@@ -53,26 +53,46 @@ L'application gère la comptabilité de l'eau d'un potager à l'aide de trois in
 
 Pour corriger ces anomalies, les algorithmes de calcul doivent intégrer les trois nouvelles règles de comportement suivantes :
 
-### Règle 1 : L'équilibrage absolu lors du transfert de minuit
+> **Mise à jour ADR-028 (2026-06-05) — Réserve hydrique signée.** Les trois règles
+> ci-dessous ont évolué pour gérer le report du surplus de pluie. Le **Besoin Cumulé**
+> devient un **bilan signé** : positif = dette, négatif = réserve d'eau. Le facteur de
+> pluie efficace 0,8 (ADR-007) est conservé.
 
-La clôture comptable ne doit plus être une simple addition du flux dans le stock. Le nouveau calcul du **Besoin Cumulé** à minuit doit faire la somme du passif et du besoin du jour, puis en soustraire la totalité de l'arrosage reçu durant la journée.
+### Règle 1 : Le bilan hydrique signé lors du transfert de minuit
 
-- **Formule algorithmique :** `Nouveau Besoin Cumulé = Maximum entre (0) et (Besoin Cumulé Précédent + Besoin Journalier du jour - Total des Arrosages Appliqués aujourd'hui)`
+La clôture comptable additionne le **bilan signé du jour** (besoin ETc − pluie efficace,
+qui peut être négatif) au bilan cumulé. Le résultat **n'est plus planché à 0** : un surplus
+de pluie reporte une réserve (bilan négatif) consommée les jours suivants. L'arrosage du
+jour n'est **pas** soustrait ici — il est déjà imputé en temps réel au bilan cumulé à la
+fermeture de la vanne (source unique, pas de double comptage).
 
-### Règle 2 : Le calcul inclusif pour les arrosages tardifs
+- **Formule algorithmique :** `Nouveau Besoin Cumulé = Besoin Cumulé Précédent + Bilan Signé du Jour`
+  où `Bilan Signé du Jour = Besoin ETc du jour − Pluie Efficace du jour` (signé).
 
-Lorsqu'un arrosage automatique est initié en soirée (définir un seuil horaire, par exemple après 12h00 ou via une configuration "Soir"), le volume d'eau commandé à la vanne ne doit pas se limiter au stock historique. Il doit anticiper la clôture de minuit en englobant le flux de la journée en cours.
+### Règle 2 : Le calcul inclusif du volume d'arrosage (toute heure)
+
+Le volume commandé à la vanne anticipe toujours la clôture de minuit en englobant le bilan
+net de la journée en cours, **quelle que soit l'heure** d'arrosage. Comme l'arrosage n'est
+imputé qu'une fois et que le bilan est signé, pré-payer le besoin du jour fait simplement
+passer le cumulé en réserve (négatif), ré-équilibrée à minuit — il n'y a plus de raison de
+distinguer matin et soir.
 
 - **Formule algorithmique :**
-  `Volume d'arrosage cible = Besoin Cumulé + Besoin Journalier en cours`
+  `Volume d'arrosage cible = Maximum entre (0) et (Besoin Cumulé + Bilan Net du Jour)`
+  Un cumulé négatif (réserve) ou un bilan du jour négatif (pluie) réduit — voire annule — le volume.
 
-### Règle 3 : L'immunisation temporelle du calendrier
+### Règle 3 : Le réancrage du calendrier sur arrosage réel
 
-Le calendrier des intervalles mesure le temps écoulé, pas l'état sec ou humide de la terre. Dès que le planificateur valide que l'intervalle de jours requis est atteint, l'échéance temporelle est considérée comme "traitée".
+Le cycle d'intervalle n'est réancré (`Date du Dernier Arrosage = aujourd'hui`) **que si un
+arrosage est effectivement émis**. Un jour d'intervalle sauté faute de besoin net (réserve
+qui couvre, ou pluie) **ne consomme pas** un nouveau cycle : le planificateur réévalue dès
+le lendemain jusqu'à ce qu'un arrosage ait lieu.
 
 - **Logique algorithmique :**
-  `Si (Date du jour - Date du Dernier Arrosage) est supérieure ou égale à l'Intervalle Configuré :`
-  `Alors -> Mettre à jour immédiatement la Date du Dernier Arrosage avec la Date du jour (que le volume d'arrosage physique final soit de X Litres ou de 0 Litre à cause de la pluie).`
+  `Si (Date du jour - Date du Dernier Arrosage) ≥ Intervalle Configuré :`
+  `  Évaluer le volume cible (Règle 2).`
+  `  Si volume > 0 (arrosage émis) -> Date du Dernier Arrosage = aujourd'hui (réancrage).`
+  `  Sinon -> ne pas réancrer ; réévaluer demain.`
 
 ---
 
@@ -80,29 +100,41 @@ Le calendrier des intervalles mesure le temps écoulé, pas l'état sec ou humid
 
 _Ces scénarios décrivent le comportement attendu à travers le parcours du jardinier pour guider l'écriture des tests de non-régression._
 
-### Scénario I : Validation de la réinitialisation de la dette après un arrosage matinal
+### Scénario I : Arrosage matinal — calcul inclusif et ré-équilibrage à minuit
 
 - **Étant donné :** Un potager configuré avec un arrosage automatique tous les 3 jours à 06h00 du matin.
 - **Et que :** Le Jour 1 et le Jour 2 ont accumulé une dette totale de 8 Litres (le **Besoin Cumulé** est égal à 8).
-- **Quand :** Au matin du Jour 3 à 06h00, l'arrosage se déclenche et distribue 8 Litres.
-- **Et que :** Durant la journée du Jour 3, le soleil brille et génère un **Besoin Journalier** de 4 Litres.
-- **Alors :** Lors du passage à minuit, le système doit appliquer la règle d'équilibrage et calculer : `8 (Passé) + 4 (Jour) - 8 (Arrosé) = 4 Litres`. Ce reliquat de 4 Litres étant inférieur ou égal à l'arrosage déjà reçu (8 Litres), le **Besoin Cumulé** au matin du Jour 4 doit être strictement égal à **0 Litre**.
+- **Et que :** Le Jour 3 ensoleillé génère un **Bilan Net du Jour** de 4 Litres.
+- **Quand :** Au matin du Jour 3 à 06h00, l'arrosage se déclenche.
+- **Alors :** Le volume commandé est inclusif (Règle 2) : `8 (dette) + 4 (jour) = 12 Litres`. L'imputation immédiate fait passer le **Besoin Cumulé** à `8 − 12 = −4` (réserve).
+- **Et alors :** Au passage de minuit, le bilan signé du jour (`+4`) est ajouté : `−4 + 4 = 0`. Le **Besoin Cumulé** au matin du Jour 4 est strictement égal à **0 Litre**.
 
-### Scénario II : Validation du calcul de volume exhaustif pour l'arrosage du soir
+### Scénario II : Arrosage du soir — résultat identique au matin (ADR-028)
 
-- **Étant donné :** Un potager configuré avec un arrosage automatique tous les 3 jours à 21h00 du soir.
-- **Et que :** Le Jour 1 et le Jour 2 ont accumulé une dette de 8 Litres (le **Besoin Cumulé** est égal à 8).
-- **Et que :** Au Jour 3 à 21h00, la journée ensoleillée a généré un **Besoin Journalier** en cours de 4 Litres.
-- **Quand :** L'arrosage automatique se déclenche à 21h00.
-- **Alors :** Le système doit sommer les deux indicateurs et commander un volume d'arrosage total de **12 Litres** (8 Litres de dette historique + 4 Litres de la journée en cours).
-- **Et alors :** Après la distribution de ces 12 Litres et le passage de minuit, le **Besoin Cumulé** au matin du Jour 4 doit être égal à **0 Litre**.
+- **Étant donné :** Le même potager mais arrosage à 21h00.
+- **Et que :** Dette de 8 Litres, bilan du jour de 4 Litres au Jour 3.
+- **Quand :** L'arrosage se déclenche à 21h00.
+- **Alors :** Le volume commandé est **12 Litres** (8 + 4), comme le matin : la décision est désormais toujours inclusive, indépendante de l'heure.
+- **Et alors :** Après distribution et passage de minuit, le **Besoin Cumulé** au Jour 4 est égal à **0 Litre**.
 
-### Scénario III : Validation de la fixité du calendrier malgré les perturbations de la pluie
+### Scénario III : Réancrage du calendrier uniquement sur arrosage réel
 
-- **Étant donné :** Un potager configuré avec un arrosage automatique tous les 3 jours à 06h00 du matin.
-- **Et que :** La **Date du Dernier Arrosage** est enregistrée au Jour 0.
-- **Et que :** Il a plu au Jour 1 et au Jour 2, maintenant le **Besoin Cumulé** à 0 Litre.
-- **Quand :** Le scheduler s'exécute au matin du Jour 3 à 06h00 (`Jour 3 - Jour 0 = 3 jours`).
-- **Alors :** L'arrosage physique est annulé (0 Litre distribué) car le besoin est nul.
-- **Et alors :** La **Date du Dernier Arrosage** doit obligatoirement être modifiée et enregistrée à la date du **Jour 3**.
-- **Conséquence attendue :** Au matin du Jour 4 et du Jour 5, l'arrosage automatique doit être ignoré. Le prochain contrôle doit être programmé de façon stricte au **Jour 6** (`Jour 6 - Jour 3 = 3 jours`), empêchant tout glissement ou retard dans le rythme de surveillance du potager.
+- **Étant donné :** Un potager arrosé tous les 3 jours à 06h00 ; **Date du Dernier Arrosage** au Jour 0.
+- **Et que :** Il a plu au Jour 1 et au Jour 2, constituant une **réserve** (Besoin Cumulé < 0).
+- **Quand :** Le scheduler s'exécute au matin du Jour 3 (`Jour 3 − Jour 0 = 3 jours`).
+- **Alors :** L'arrosage est annulé (0 Litre) car la réserve couvre le besoin du jour.
+- **Et alors :** La **Date du Dernier Arrosage** **n'est pas avancée** (aucun arrosage réel) — le cycle n'est pas réancré.
+- **Conséquence attendue :** Le planificateur **réévalue au Jour 4**, et arrose dès que la réserve ne couvre plus le besoin, au lieu d'attendre un nouveau cycle complet jusqu'au Jour 6.
+
+### Scénario IV : Report du surplus de pluie en réserve puis reprise de l'arrosage
+
+_Surface 6 m² (1 mm = 6 L), facteur de pluie efficace 0,8, intervalle 3 jours._
+
+- **Jour 1 :** besoin nul, pluie 15 mm → 12 mm efficaces → **72 L** de surplus. Bilan cumulé : **−72 L** (réserve). Aucun arrosage.
+- **Jour 2 :** besoin nul, pluie 10 mm → 48 L de surplus. Bilan cumulé : **−120 L**. Aucun arrosage.
+- **Jour 3 :** beau, besoin **40 L**. L'intervalle de 3 j est atteint mais la réserve couvre (`−120 + 40 = −80 ≤ 0`) → **aucun arrosage**, cycle **non réancré**. Bilan cumulé : **−80 L**.
+- **Jour 4 :** besoin **120 L**. Réévaluation : `−80 + 120 = +40 > 0` → **arrose 40 L**, cycle réancré. Bilan cumulé ramené à **0 L**.
+
+> Note : avec de la pluie brute (sans le facteur 0,8) on banquerait 150 L et le Jour 4
+> n'arroserait que 10 L. Le facteur 0,8 (ADR-007) ramène le surplus banqué à 120 L, d'où
+> les **40 L** au Jour 4. Couvert par `tests/test_water_reserve_scenario.py`.

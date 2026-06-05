@@ -1,52 +1,41 @@
-"""ADR-024 — Strategy : Calcul adaptatif du volume d'arrosage.
+"""ADR-028 — Calcul du volume d'arrosage : décision toujours inclusive.
 
 Aucune dépendance homeassistant.* — testable directement avec pytest.
+
+Remplace ADR-024 (distinction matin/soir) : depuis que le bilan hydrique est signé
+et que l'arrosage n'est imputé qu'une fois (apply_watering_volumes), arroser le besoin
+du jour à n'importe quelle heure est cohérent — le pré-paiement fait simplement passer
+le cumulé sous zéro (réserve), que la clôture de minuit ré-équilibre.
 """
 from __future__ import annotations
 
 from typing import Protocol
-
-from ..const import EVENING_IRRIGATION_HOUR_THRESHOLD
 
 
 class WateringVolumeStrategy(Protocol):
     """Protocole de calcul du volume d'arrosage cible."""
 
     def calculate_target_volume(
-        self, cumulative_need: float, daily_need: float
+        self, cumulative_need: float, daily_balance: float
     ) -> float: ...
 
 
-class StandardMorningStrategy:
-    """Arrosage matinal : rembourse uniquement la dette historique.
+class InclusiveWateringStrategy:
+    """Arrosage = dette historique + bilan net du jour (Règle 2 généralisée).
 
-    Le besoin journalier en cours sera comptabilisé à minuit (Règle 1).
+    Inclut le besoin du jour pour anticiper la clôture de minuit, à toute heure.
+    Un bilan du jour négatif (surplus de pluie) réduit le volume cible — voire
+    l'annule si la réserve cumulée couvre le besoin.
     """
 
-    def calculate_target_volume(self, cumulative_need: float, daily_need: float) -> float:
-        return cumulative_need
-
-
-class InclusiveEveningStrategy:
-    """Arrosage tardif : anticipe la clôture de minuit (Règle 2).
-
-    Inclut le besoin journalier pour éviter une dette fantôme à 00h01.
-    """
-
-    def calculate_target_volume(self, cumulative_need: float, daily_need: float) -> float:
-        return cumulative_need + daily_need
+    def calculate_target_volume(self, cumulative_need: float, daily_balance: float) -> float:
+        return cumulative_need + daily_balance
 
 
 class WateringStrategyFactory:
-    """Sélectionne la stratégie de volume adaptée à l'heure d'arrosage (ADR-024)."""
+    """Fournit la stratégie de volume (ADR-028) — unique et indépendante de l'heure."""
 
     @staticmethod
     def from_irrigation_time(irrigation_time: str) -> WateringVolumeStrategy:
-        """Retourne la stratégie correspondant à l'heure HH:MM:SS configurée."""
-        try:
-            hour = int(irrigation_time.split(":")[0])
-            if hour >= EVENING_IRRIGATION_HOUR_THRESHOLD:
-                return InclusiveEveningStrategy()
-        except (ValueError, AttributeError, IndexError):
-            pass
-        return StandardMorningStrategy()
+        """Retourne la stratégie inclusive. L'argument est conservé pour compatibilité."""
+        return InclusiveWateringStrategy()

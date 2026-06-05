@@ -52,7 +52,16 @@ class CropResult:
     """Volume d'arrosage distribué aujourd'hui à cette culture (L), issu de la vanne globale."""
 
     daily_need_liters: float = 0.0
-    """Besoin journalier net = max(0, liters − watering_applied_today_liters)."""
+    """Besoin journalier net affiché = max(0, daily_balance_liters)."""
+
+    daily_balance_liters: float = 0.0
+    """Bilan hydrique signé du jour (L) = ETc − pluie efficace.
+
+    Positif = la culture consomme plus que la pluie reçue (la dette croît) ;
+    négatif = surplus de pluie qui alimente la réserve. Sert à la comptabilité
+    (journal, clôture de minuit, décision d'arrosage) — distinct de
+    daily_need_liters qui reste ≥ 0 pour l'affichage.
+    """
 
 
 @dataclass(frozen=True)
@@ -66,7 +75,13 @@ class IrrigationData:
     """Somme nette de toutes les cultures avant déduction de l'arrosage (litres/jour)."""
 
     total_daily_need_liters: float = 0.0
-    """Somme des besoins journaliers après déduction de l'arrosage d'aujourd'hui (litres/jour)."""
+    """Somme des besoins journaliers affichés (≥ 0) après déduction de l'arrosage d'aujourd'hui (litres/jour)."""
+
+    total_daily_balance_liters: float = 0.0
+    """Somme des bilans hydriques signés du jour (L) — peut être négatif (surplus de pluie).
+
+    Utilisée par la décision d'arrosage inclusive : volume = max(0, cumulé + ce total).
+    """
 
     eto_mm: float = 0.0
     """ETo du jour utilisée pour tous les calculs (mm/j)."""

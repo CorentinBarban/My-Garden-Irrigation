@@ -1,7 +1,7 @@
 # 025 — Observer : Immunisation temporelle du calendrier d'intervalle
 
 **Date** : 2026-06-03  
-**Statut** : Proposé  
+**Statut** : **Remplacé par ADR-028** (le calendrier est désormais réancré uniquement sur arrosage réel ; le principe d'ADR-021 est réactivé)  
 **Décideurs** : Équipe projet
 
 **Supersède** : ADR-021 (Conditionnement du calendrier à l'émission effective de l'événement)

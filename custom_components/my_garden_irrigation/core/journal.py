@@ -38,8 +38,11 @@ class DailyWaterLedger:
     def record(self, tx: WaterTransaction) -> None:
         self._transactions.append(tx)
 
-    def set_daily_need(self, crop_id: str, need: float, recorded_at: datetime) -> None:
-        """Enregistre (ou remplace) l'apport ETo journalier d'une culture.
+    def set_daily_need(self, crop_id: str, balance: float, recorded_at: datetime) -> None:
+        """Enregistre (ou remplace) le bilan hydrique signé du jour d'une culture (ADR-028).
+
+        `balance` = ETc − pluie efficace (signé) : positif = consommation nette
+        (la dette croît), négatif = surplus de pluie (alimente la réserve).
 
         Idempotent par culture : une seule transaction ETO est conservée par jour,
         quel que soit le nombre de rafraîchissements météo horaires.
@@ -50,15 +53,23 @@ class DailyWaterLedger:
             if not (tx.crop_id == crop_id and tx.source == WaterSource.ETO)
         ]
         self._transactions.append(
-            WaterTransaction(crop_id, need, WaterSource.ETO, recorded_at)
+            WaterTransaction(crop_id, balance, WaterSource.ETO, recorded_at)
         )
 
     def replay(self) -> dict[str, float]:
-        """Recalcule le solde net par culture depuis zéro (plancher 0)."""
+        """Bilan hydrique signé du jour par culture (apport ETo/pluie uniquement).
+
+        Les transactions IRRIGATION sont **exclues** : l'arrosage est déjà imputé au
+        bilan cumulé en temps réel par apply_watering_volumes (ADR-028). Les inclure
+        ici les compterait deux fois. Le résultat n'est pas planché — un surplus de
+        pluie produit une valeur négative reportée à la réserve à minuit.
+        """
         balance: dict[str, float] = {}
         for tx in self._transactions:
+            if tx.source == WaterSource.IRRIGATION:
+                continue
             balance[tx.crop_id] = balance.get(tx.crop_id, 0.0) + tx.volume_liters
-        return {k: max(0.0, v) for k, v in balance.items()}
+        return balance
 
     def applied_volumes(self) -> dict[str, float]:
         """Volumes arrosés aujourd'hui par culture (litres positifs).

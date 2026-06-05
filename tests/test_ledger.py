@@ -22,8 +22,7 @@ from custom_components.my_garden_irrigation.core.ledger import (
     midnight_transfer,
 )
 from custom_components.my_garden_irrigation.core.strategies import (
-    InclusiveEveningStrategy,
-    StandardMorningStrategy,
+    InclusiveWateringStrategy,
     WateringStrategyFactory,
 )
 
@@ -120,58 +119,51 @@ def test_midnight_transfer_returns_new_dict():
     result = midnight_transfer(cumulative, daily)
     assert result is not cumulative
 
-def test_midnight_transfer_floors_negative_balance():
-    """Un solde du jour négatif (sur-arrosage) ne rend jamais le cumulé négatif."""
+def test_midnight_transfer_allows_negative_reserve():
+    """ADR-028 : un bilan du jour négatif (surplus de pluie) crée une réserve (cumulé < 0)."""
     result = midnight_transfer({"c1": 1.0}, {"c1": -5.0})
-    assert result["c1"] == pytest.approx(0.0)
+    assert result["c1"] == pytest.approx(-4.0)
 
 
 # ---------------------------------------------------------------------------
-# ADR-024 — Strategy : Calcul adaptatif du volume d'arrosage
+# ADR-028 — Décision inclusive unique (remplace ADR-024 matin/soir)
 # ---------------------------------------------------------------------------
 
-def test_morning_strategy_ignores_daily_need():
-    """Scénario I spec : arrosage matinal → uniquement la dette historique."""
-    s = StandardMorningStrategy()
-    assert s.calculate_target_volume(cumulative_need=8.0, daily_need=4.0) == pytest.approx(8.0)
+def test_inclusive_strategy_adds_daily_balance():
+    """Volume = dette cumulée + bilan net du jour, à toute heure."""
+    s = InclusiveWateringStrategy()
+    assert s.calculate_target_volume(cumulative_need=8.0, daily_balance=4.0) == pytest.approx(12.0)
 
-def test_morning_strategy_zero_cumulative():
-    s = StandardMorningStrategy()
-    assert s.calculate_target_volume(0.0, 4.0) == pytest.approx(0.0)
-
-def test_evening_strategy_includes_daily_need():
-    """Scénario II spec : arrosage tardif → dette + besoin journalier."""
-    s = InclusiveEveningStrategy()
-    assert s.calculate_target_volume(cumulative_need=8.0, daily_need=4.0) == pytest.approx(12.0)
-
-def test_evening_strategy_zero_cumulative():
-    s = InclusiveEveningStrategy()
+def test_inclusive_strategy_zero_cumulative():
+    s = InclusiveWateringStrategy()
     assert s.calculate_target_volume(0.0, 4.0) == pytest.approx(4.0)
 
+def test_inclusive_strategy_negative_reserve_offsets_need():
+    """Une réserve cumulée (cumulé < 0) réduit le volume cible : −10 réserve + 4 besoin = −6."""
+    s = InclusiveWateringStrategy()
+    assert s.calculate_target_volume(cumulative_need=-10.0, daily_balance=4.0) == pytest.approx(-6.0)
+
+def test_inclusive_strategy_rainy_day_balance_negative():
+    """Un bilan du jour négatif (pluie) réduit aussi le volume : 8 dette − 5 pluie = 3."""
+    s = InclusiveWateringStrategy()
+    assert s.calculate_target_volume(cumulative_need=8.0, daily_balance=-5.0) == pytest.approx(3.0)
+
 
 # ---------------------------------------------------------------------------
-# ADR-024 — WateringStrategyFactory
+# ADR-028 — WateringStrategyFactory (stratégie unique, indépendante de l'heure)
 # ---------------------------------------------------------------------------
 
-def test_factory_morning_below_threshold():
+def test_factory_returns_inclusive_morning():
     s = WateringStrategyFactory.from_irrigation_time("06:00:00")
-    assert isinstance(s, StandardMorningStrategy)
+    assert isinstance(s, InclusiveWateringStrategy)
 
-def test_factory_evening_at_threshold():
-    s = WateringStrategyFactory.from_irrigation_time("12:00:00")
-    assert isinstance(s, InclusiveEveningStrategy)
-
-def test_factory_evening_above_threshold():
+def test_factory_returns_inclusive_evening():
     s = WateringStrategyFactory.from_irrigation_time("21:30:00")
-    assert isinstance(s, InclusiveEveningStrategy)
+    assert isinstance(s, InclusiveWateringStrategy)
 
-def test_factory_invalid_time_defaults_to_morning():
+def test_factory_returns_inclusive_invalid_time():
     s = WateringStrategyFactory.from_irrigation_time("invalid")
-    assert isinstance(s, StandardMorningStrategy)
-
-def test_factory_empty_string_defaults_to_morning():
-    s = WateringStrategyFactory.from_irrigation_time("")
-    assert isinstance(s, StandardMorningStrategy)
+    assert isinstance(s, InclusiveWateringStrategy)
 
 
 # ---------------------------------------------------------------------------
@@ -183,11 +175,11 @@ def test_orchestrator_accumulates():
     result = orch.execute({"c1": 10.0}, {"c1": 3.0})
     assert result["c1"] == pytest.approx(13.0)
 
-def test_orchestrator_floors_negative_balance():
-    """Un solde du jour négatif est planché à 0 par l'orchestrateur."""
+def test_orchestrator_allows_negative_reserve():
+    """ADR-028 : l'orchestrateur reporte un surplus en réserve (cumulé signé négatif)."""
     orch = MidnightClosureOrchestrator()
     result = orch.execute({"c1": 1.0}, {"c1": -50.0})
-    assert result["c1"] == pytest.approx(0.0)
+    assert result["c1"] == pytest.approx(-49.0)
 
 def test_orchestrator_does_not_mutate():
     cumulative = {"c1": 5.0}
@@ -205,18 +197,18 @@ def test_orchestrator_does_not_mutate():
 _NOW = datetime(2026, 6, 3, 10, 0, 0)
 
 
-def test_ledger_replay_net_balance():
+def test_ledger_replay_excludes_irrigation():
+    """ADR-028 : replay ne somme que l'apport ETo/pluie ; l'arrosage est exclu (imputé ailleurs)."""
     ledger = DailyWaterLedger()
     ledger.record(WaterTransaction("c1", 4.0, WaterSource.ETO, _NOW))
     ledger.record(WaterTransaction("c1", -3.0, WaterSource.IRRIGATION, _NOW))
-    assert ledger.replay()["c1"] == pytest.approx(1.0)
+    assert ledger.replay()["c1"] == pytest.approx(4.0)
 
-def test_ledger_replay_no_negative():
-    """Sur-arrosage : le solde est clampé à 0."""
+def test_ledger_replay_negative_on_rain_surplus():
+    """Un apport ETo signé négatif (surplus de pluie) donne un bilan du jour négatif."""
     ledger = DailyWaterLedger()
-    ledger.record(WaterTransaction("c1", 4.0, WaterSource.ETO, _NOW))
-    ledger.record(WaterTransaction("c1", -10.0, WaterSource.IRRIGATION, _NOW))
-    assert ledger.replay()["c1"] == pytest.approx(0.0)
+    ledger.record(WaterTransaction("c1", -72.0, WaterSource.ETO, _NOW))
+    assert ledger.replay()["c1"] == pytest.approx(-72.0)
 
 def test_ledger_replay_empty():
     assert DailyWaterLedger().replay() == {}
@@ -227,7 +219,7 @@ def test_ledger_replay_multi_crop():
     ledger.record(WaterTransaction("c2", 2.0, WaterSource.ETO, _NOW))
     ledger.record(WaterTransaction("c1", -4.0, WaterSource.IRRIGATION, _NOW))
     result = ledger.replay()
-    assert result["c1"] == pytest.approx(0.0)
+    assert result["c1"] == pytest.approx(4.0)  # arrosage exclu du bilan de minuit
     assert result["c2"] == pytest.approx(2.0)
 
 def test_ledger_bool_empty():
@@ -239,12 +231,13 @@ def test_ledger_bool_non_empty():
     assert ledger
 
 def test_ledger_roundtrip_storage():
-    """to_storage / from_storage préserve le résultat du replay."""
+    """to_storage / from_storage préserve replay (ETo) et applied_volumes (arrosage)."""
     ledger = DailyWaterLedger()
     ledger.record(WaterTransaction("c1", 4.0, WaterSource.ETO, _NOW))
     ledger.record(WaterTransaction("c1", -1.5, WaterSource.IRRIGATION, _NOW))
     restored = DailyWaterLedger.from_storage(ledger.to_storage())
-    assert restored.replay()["c1"] == pytest.approx(2.5)
+    assert restored.replay()["c1"] == pytest.approx(4.0)         # bilan ETo (arrosage exclu)
+    assert restored.applied_volumes()["c1"] == pytest.approx(1.5)  # arrosage conservé
 
 def test_ledger_roundtrip_empty():
     restored = DailyWaterLedger.from_storage([])
@@ -276,7 +269,8 @@ def test_set_daily_need_preserves_irrigation():
     ledger.set_daily_need("c1", 5.0, _NOW)
     ledger.record(WaterTransaction("c1", -2.0, WaterSource.IRRIGATION, _NOW))
     ledger.set_daily_need("c1", 5.0, _NOW)  # nouveau refresh météo
-    assert ledger.replay()["c1"] == pytest.approx(3.0)  # 5 − 2, arrosage conservé
+    assert ledger.replay()["c1"] == pytest.approx(5.0)             # bilan ETo seul (arrosage exclu)
+    assert ledger.applied_volumes()["c1"] == pytest.approx(2.0)   # arrosage toujours présent
 
 def test_applied_volumes_sums_irrigation_as_positive():
     ledger = DailyWaterLedger()

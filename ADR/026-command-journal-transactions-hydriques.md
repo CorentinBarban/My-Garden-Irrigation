@@ -1,7 +1,7 @@
 # 026 — Command : Journal de transactions hydriques pour la résilience
 
 **Date** : 2026-06-03  
-**Statut** : Proposé  
+**Statut** : Proposé — **amendé par ADR-028** (`replay()` exclut l'arrosage et n'est plus planché : il fournit le bilan signé ETo/pluie du jour)  
 **Décideurs** : Équipe projet
 
 ---

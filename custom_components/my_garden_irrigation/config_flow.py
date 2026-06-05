@@ -13,6 +13,7 @@ Options Flow (post-installation) :
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -58,6 +59,8 @@ from .const import (
     WATERING_MODES,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class MyGardenIrrigationConfigFlow(ConfigFlow, domain=DOMAIN):
     """Config Flow — installation initiale de l'intégration."""
@@ -73,9 +76,11 @@ class MyGardenIrrigationConfigFlow(ConfigFlow, domain=DOMAIN):
             name = user_input[CONF_NAME].strip()
             if not name:
                 errors[CONF_NAME] = "invalid_name"
+                _LOGGER.debug("Création refusée : nom de potager vide.")
             else:
                 await self.async_set_unique_id(name.lower())
                 self._abort_if_unique_id_configured()
+                _LOGGER.info("Nouveau potager configuré : %s", name)
                 return self.async_create_entry(
                     title=name,
                     data={CONF_NAME: name},
@@ -167,7 +172,9 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
             if density_raw <= 0:
                 errors[CONF_DENSITY] = "invalid_density"
 
-            if not errors:
+            if errors:
+                _LOGGER.debug("Ajout de culture refusé — erreurs : %s", errors)
+            else:
                 crop_type = user_input[CONF_CROP_TYPE]
                 self._crops.append(
                     {
@@ -179,6 +186,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
                         CONF_DENSITY: float(user_input[CONF_DENSITY]),
                     }
                 )
+                _LOGGER.info("Culture ajoutée : %s (%s)", crop_name_raw.strip(), crop_type)
                 return self._save()
 
         return self.async_show_form(
@@ -233,6 +241,7 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
             self._crops = [
                 c for c in self._crops if c[CONF_CROP_ID] != crop_id_to_remove
             ]
+            _LOGGER.info("Culture supprimée : %s", crop_id_to_remove)
             return self._save()
 
         # Le label affiché est le seul nom de culture ; le nombre de cultures est

@@ -36,11 +36,13 @@ class IrrigationScheduler:
         config: RuntimeConfigState,
         on_midnight: Callable[[], Awaitable[None]],
         on_trigger: Callable[[str], Awaitable[None]],
+        logger: logging.Logger | logging.LoggerAdapter = _LOGGER,
     ) -> None:
         self._hass = hass
         self._config = config
         self._on_midnight = on_midnight
         self._on_trigger = on_trigger
+        self._log = logger
         self._midnight_unsub: Callable | None = None
         self._auto_unsub: Callable | None = None
         self.next_trigger: datetime | None = None
@@ -92,7 +94,7 @@ class IrrigationScheduler:
         self._auto_unsub = async_track_point_in_time(
             self._hass, self._handle_auto_irrigation, next_trigger
         )
-        _LOGGER.debug("Arrosage automatique planifié à %s", next_trigger)
+        self._log.debug("Arrosage automatique planifié à %s", next_trigger)
 
     def _compute_next_trigger(
         self, now: datetime, hour: int, minute: int, reanchor: bool = False
@@ -154,7 +156,7 @@ class IrrigationScheduler:
         try:
             await self._on_midnight()
         except Exception as exc:
-            _LOGGER.error("Erreur lors du transfert de minuit : %s", exc)
+            self._log.error("Erreur lors du transfert de minuit : %s", exc)
         finally:
             self._schedule_midnight()
 
@@ -167,7 +169,7 @@ class IrrigationScheduler:
             if last_date_str:
                 days_since = (today - date.fromisoformat(last_date_str)).days
                 if days_since < interval_days:
-                    _LOGGER.debug(
+                    self._log.debug(
                         "Arrosage auto ignoré — intervalle %dj, dernier il y a %dj.",
                         interval_days,
                         days_since,

@@ -37,23 +37,24 @@ def midnight_transfer(
     cumulative_need: dict[str, float],
     daily_balance: dict[str, float],
 ) -> dict[str, float]:
-    """Ajoute le solde hydrique du jour au bilan cumulé, par culture.
+    """Ajoute le bilan hydrique signé du jour au bilan cumulé, par culture (ADR-028).
 
-    Le solde du jour (apport ETo moins arrosages, déjà planché à 0) est fourni
-    par DailyWaterLedger.replay() — la déduction des arrosages est faite en amont,
-    cette fonction se contente d'accumuler. Le résultat est planché à 0 et opère
-    sur une copie : les dictionnaires d'entrée ne sont pas mutés.
+    Le bilan du jour (apport ETo − pluie efficace, signé) est fourni par
+    DailyWaterLedger.replay() ; l'arrosage en est exclu car déjà imputé en temps
+    réel par apply_watering_volumes. Le résultat n'est **pas planché** : un cumulé
+    négatif représente une réserve d'eau reportée. Opère sur une copie : les
+    dictionnaires d'entrée ne sont pas mutés.
 
     Args:
-        cumulative_need: Bilan cumulé existant (crop_id → litres).
-        daily_balance: Solde net du jour par culture (crop_id → litres).
+        cumulative_need: Bilan cumulé signé existant (crop_id → litres).
+        daily_balance: Bilan signé du jour par culture (crop_id → litres).
 
     Returns:
-        Nouveau bilan cumulé.
+        Nouveau bilan cumulé signé.
     """
     result = dict(cumulative_need)
     for crop_id, daily in daily_balance.items():
-        result[crop_id] = max(0.0, result.get(crop_id, 0.0) + daily)
+        result[crop_id] = result.get(crop_id, 0.0) + daily
     return result
 
 
@@ -74,5 +75,5 @@ class MidnightClosureOrchestrator:
         cumulative_need: dict[str, float],
         daily_balance: dict[str, float],
     ) -> dict[str, float]:
-        """Retourne le bilan cumulé après ajout du solde du jour. Sans effet de bord."""
+        """Retourne le bilan cumulé signé après ajout du bilan du jour. Sans effet de bord."""
         return midnight_transfer(cumulative_need, daily_balance)

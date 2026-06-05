@@ -70,6 +70,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    coordinator.logger.info(
+        "Intégration initialisée — %d culture(s) configurée(s).", len(current_crop_ids)
+    )
+
     if not hass.services.has_service(DOMAIN, SERVICE_RECALCULATE):
         async def _handle_recalculate(_call: ServiceCall) -> None:
             for coord in hass.data.get(DOMAIN, {}).values():
@@ -86,7 +90,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Décharge une entrée de configuration."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator.logger.info("Intégration déchargée.")
 
     if not hass.data[DOMAIN]:
         hass.services.async_remove(DOMAIN, SERVICE_RECALCULATE)

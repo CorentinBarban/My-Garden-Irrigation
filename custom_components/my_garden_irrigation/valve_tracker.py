@@ -32,10 +32,12 @@ class ValveTracker:
         hass: HomeAssistant,
         config: RuntimeConfigState,
         on_volumes_applied: Callable[[dict[str, float]], Awaitable[None]],
+        logger: logging.Logger | logging.LoggerAdapter = _LOGGER,
     ) -> None:
         self._hass = hass
         self._config = config
         self._on_volumes_applied = on_volumes_applied
+        self._log = logger
         self._accumulated_session_volumes: dict[str, float] = {}
         # Dernier état binaire connu (True = ouverte) ; sert de référence pour
         # ignorer les états intermédiaires unavailable/unknown.
@@ -53,7 +55,7 @@ class ValveTracker:
 
         valve_id: str | None = self._config.valve_entity_id
         if not valve_id:
-            _LOGGER.warning(
+            self._log.warning(
                 "Aucune vanne globale configurée — "
                 "le suivi du volume distribué est désactivé."
             )
@@ -62,7 +64,7 @@ class ValveTracker:
         unsub = async_track_state_change_event(
             self._hass, [valve_id], self._handle_valve_state_change
         )
-        _LOGGER.debug("Écoute de la vanne globale : %s", valve_id)
+        self._log.debug("Écoute de la vanne globale : %s", valve_id)
 
         @callback
         def _cleanup() -> None:
@@ -85,7 +87,7 @@ class ValveTracker:
                 self._was_open = True
                 if self._config.get_valve_open_time() is None:
                     self._config.set_valve_open_time(dt_util.utcnow())
-                    _LOGGER.warning(
+                    self._log.warning(
                         "Vanne %s ouverte au démarrage sans heure d'ouverture connue — "
                         "décompte du volume depuis maintenant.",
                         valve_id,
@@ -93,13 +95,13 @@ class ValveTracker:
             elif current in _CLOSED_STATES:
                 self._was_open = False
                 if self._config.get_valve_open_time() is not None:
-                    _LOGGER.info(
+                    self._log.info(
                         "Vanne %s fermée pendant le redémarrage — comptabilisation du volume.",
                         valve_id,
                     )
                     await self._handle_valve_close()
         except Exception as exc:
-            _LOGGER.warning(
+            self._log.warning(
                 "Erreur lors de la restauration de l'état de la vanne : %s", exc
             )
 
@@ -120,7 +122,7 @@ class ValveTracker:
         if new in _OPEN_STATES:
             if not self._was_open:
                 self._config.set_valve_open_time(dt_util.utcnow())
-                _LOGGER.debug("Vanne ouverte à %s", self._config.get_valve_open_time())
+                self._log.debug("Vanne ouverte à %s", self._config.get_valve_open_time())
             self._was_open = True
         elif new in _CLOSED_STATES:
             if self._was_open:
@@ -139,7 +141,7 @@ class ValveTracker:
         total_volume = (duration_s / 3600.0) * flow_rate
         self._config.set_valve_open_time(None)
 
-        _LOGGER.debug(
+        self._log.debug(
             "Vanne fermée — durée=%.0fs, débit=%.1fL/h → volume distribué=%.1fL",
             duration_s,
             flow_rate,
@@ -159,7 +161,7 @@ class ValveTracker:
             await self._on_volumes_applied(self._accumulated_session_volumes)
             self._accumulated_session_volumes = {}
         else:
-            _LOGGER.debug(
+            self._log.debug(
                 "Fermeture intermédiaire (Cycle & Soak) — volume accumulé=%.1fL, "
                 "comptabilisation différée.",
                 sum(self._accumulated_session_volumes.values()),

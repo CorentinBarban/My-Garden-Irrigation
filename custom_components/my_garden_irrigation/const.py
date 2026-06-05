@@ -148,7 +148,6 @@ SERVICE_RECALCULATE = "recalculate"
 # --- Validation ---
 MAX_REASONABLE_SURFACE_M2 = 10_000
 
-# --- Arrosage tardif (Règle 2 spec) ---
-EVENING_IRRIGATION_HOUR_THRESHOLD = 12
-"""Heure (incluse) à partir de laquelle l'arrosage est considéré tardif.
-Un arrosage tardif inclut le besoin journalier en cours dans son volume cible."""
+# Note : l'ancien seuil EVENING_IRRIGATION_HOUR_THRESHOLD (ADR-024, distinction
+# matin/soir) est supprimé — la décision d'arrosage est désormais toujours inclusive
+# (ADR-028), indépendante de l'heure.
