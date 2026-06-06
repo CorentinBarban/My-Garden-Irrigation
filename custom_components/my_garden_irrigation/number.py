@@ -124,8 +124,8 @@ class GlobalFlowRateNumber(NumberEntity):
     _attr_translation_key = "global_flow_rate"
     _attr_icon = "mdi:water-pump"
     _attr_native_min_value = 0
-    _attr_native_max_value = 10_000
-    _attr_native_step = 0.1
+    _attr_native_max_value = 1000
+    _attr_native_step = 1
     _attr_native_unit_of_measurement = "L/h"
     _attr_mode = NumberMode.BOX
 
@@ -139,7 +139,7 @@ class GlobalFlowRateNumber(NumberEntity):
         return self._coordinator.config.flow_rate
 
     async def async_set_native_value(self, value: float) -> None:
-        self._coordinator.set_flow_rate(round(value, 1))
+        self._coordinator.set_flow_rate(round(value))
         self.async_write_ha_state()
 
 
@@ -150,7 +150,7 @@ class WateringIntervalDaysNumber(NumberEntity):
     _attr_translation_key = "watering_interval_days"
     _attr_icon = "mdi:calendar-range"
     _attr_native_min_value = 1
-    _attr_native_max_value = 30
+    _attr_native_max_value = 7
     _attr_native_step = 1
     _attr_mode = NumberMode.BOX
 
@@ -199,9 +199,9 @@ class SoakDurationNumber(NumberEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "soak_duration"
     _attr_icon = "mdi:timer-sand"
-    _attr_native_min_value = 1
-    _attr_native_max_value = 120
-    _attr_native_step = 1
+    _attr_native_min_value = 0
+    _attr_native_max_value = 60
+    _attr_native_step = 5
     _attr_native_unit_of_measurement = "min"
     _attr_mode = NumberMode.BOX
 
