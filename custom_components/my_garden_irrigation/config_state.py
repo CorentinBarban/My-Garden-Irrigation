@@ -20,6 +20,7 @@ from .const import (
     CONF_GLOBAL_FLOW_RATE,
     CONF_GLOBAL_VALVE_ENTITY_ID,
     CONF_IRRIGATION_TIME,
+    CONF_MULCH_ACTIVE,
     CONF_NB_PLANTS,
     CONF_SOAK_DURATION,
     CONF_STAGE,
@@ -48,9 +49,9 @@ _RUNTIME_CONFIG_KEYS = (
     CONF_SOAK_DURATION,
 )
 
-# Champs par culture pilotables par l'utilisateur via l'UI (number/select).
+# Champs par culture pilotables par l'utilisateur via l'UI (number/select/switch).
 # Persistés dans le Store HA (plus de RestoreEntity) et restaurés au boot.
-_CROP_OVERRIDE_FIELDS = (CONF_NB_PLANTS, CONF_DENSITY, CONF_STAGE)
+_CROP_OVERRIDE_FIELDS = (CONF_NB_PLANTS, CONF_DENSITY, CONF_STAGE, CONF_MULCH_ACTIVE)
 
 
 def _crops_snapshot(options: dict) -> dict:

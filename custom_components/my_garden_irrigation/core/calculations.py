@@ -5,10 +5,28 @@ Testables directement avec pytest standard.
 """
 from __future__ import annotations
 
+from ..const import FAO56_MULCH_STAGE_FACTORS
 from .models import CropResult, IrrigationData
 
 EFFECTIVE_RAINFALL_FACTOR = 0.8
 """Part des précipitations brutes retenue par le sol (ADR-007)."""
+
+
+def apply_mulch_factor(etc_liters: float, stage: str, mulch_active: bool) -> float:
+    """Atténue l'ETc selon le stade FAO 56 si le paillage est actif (ADR-029).
+
+    Le paillis réduit l'évaporation directe du sol (Ke), dominante tant que la
+    canopée est incomplète ; son effet est donc fort au stade initial et marginal
+    en mi-saison. L'atténuation s'applique sur l'ETc *avant* la déduction de la
+    pluie efficace : elle modélise une perte évaporative moindre, pas une pluie
+    reçue moindre.
+
+    Stade inconnu ou paillage inactif → ETc inchangé (facteur 1,0).
+    """
+    if not mulch_active:
+        return etc_liters
+    factor = FAO56_MULCH_STAGE_FACTORS.get(stage, 1.0)
+    return etc_liters * factor
 
 
 def compute_surface_m2(nb_plants: int, density: float) -> float:
@@ -70,14 +88,18 @@ def compute_crop_result(
     precipitation_mm: float,
     crop_type: str,
     stage: str,
+    mulch_active: bool = False,
     watering_applied_today_liters: float = 0.0,
 ) -> CropResult:
     """Calcule tous les indicateurs pour une culture en un appel.
 
     Paramètres nommés obligatoires pour éviter les erreurs d'ordre.
+    Si mulch_active, l'ETc est atténué selon le stade FAO 56 (ADR-029).
     """
     surface_m2 = compute_surface_m2(nb_plants, density)
-    etc_liters = compute_etc_liters(kc, eto_mm, surface_m2)
+    etc_liters = apply_mulch_factor(
+        compute_etc_liters(kc, eto_mm, surface_m2), stage, mulch_active
+    )
     effective_rainfall_mm = compute_effective_rainfall_mm(precipitation_mm)
     balance_liters = compute_balance_liters(etc_liters, effective_rainfall_mm, surface_m2)
     net_liters = max(0.0, balance_liters)
@@ -95,6 +117,7 @@ def compute_crop_result(
         stage=stage,
         nb_plants=nb_plants,
         density=density,
+        mulch_active=mulch_active,
         watering_applied_today_liters=round(watering_applied_today_liters, 1),
         daily_need_liters=round(daily_need_liters, 1),
         daily_balance_liters=round(balance_liters, 1),
@@ -143,6 +166,7 @@ def compute_irrigation_data(
         stage: str = crop["stage"]
         nb_plants: int = crop["nb_plants"]
         density: float = crop["density"]
+        mulch_active: bool = bool(crop.get("mulch_active", False))
 
         kc = _get_kc(kc_data, crop_type, stage)
         if kc is None:
@@ -156,6 +180,7 @@ def compute_irrigation_data(
             precipitation_mm=precipitation_mm,
             crop_type=crop_type,
             stage=stage,
+            mulch_active=mulch_active,
             watering_applied_today_liters=_watering.get(crop_id, 0.0),
         )
         results[crop_id] = result

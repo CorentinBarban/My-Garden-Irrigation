@@ -13,12 +13,24 @@ CONF_CROP_TYPE = "crop_type"
 CONF_STAGE = "stage"
 CONF_NB_PLANTS = "nb_plants"
 CONF_DENSITY = "density"
+CONF_MULCH_ACTIVE = "mulch_active"
 
 # --- Stades de croissance FAO ---
 STAGE_INI = "ini"
 STAGE_MID = "mid"
 STAGE_END = "end"
 STAGES = [STAGE_INI, STAGE_MID, STAGE_END]
+
+# --- Paillage : atténuation de l'ETc par stade FAO 56 (ADR-029) ---
+# Le paillis bloque l'évaporation directe du sol (Ke), critique tant que la
+# canopée est incomplète. Son effet décroît à mesure que le feuillage ombrage
+# le sol : abattement fort au stade initial, marginal en mi-saison.
+# Un stade absent de ce dict → facteur 1,0 (aucune atténuation, comportement sûr).
+FAO56_MULCH_STAGE_FACTORS: dict[str, float] = {
+    STAGE_INI: 0.55,  # −45 % : sol nu, évaporation directe largement bloquée
+    STAGE_MID: 0.90,  # −10 % : canopée complète, transpiration dominante
+    STAGE_END: 0.85,  # −15 % : début de sénescence, canopée qui s'ouvre
+}
 
 # --- Cultures supportées (clés JSON Kc) ---
 SUPPORTED_CROPS = [

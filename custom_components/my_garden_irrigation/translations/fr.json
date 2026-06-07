@@ -122,7 +122,8 @@
       "start_irrigation_now": { "name": "Lancer l'arrosage maintenant" }
     },
     "switch": {
-      "auto_irrigation": { "name": "Arrosage automatique" }
+      "auto_irrigation": { "name": "Arrosage automatique" },
+      "mulch_active": { "name": "Paillage" }
     },
     "time": {
       "irrigation_time": { "name": "Heure d'arrosage" }

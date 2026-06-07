@@ -144,6 +144,9 @@
     "switch": {
       "auto_irrigation": {
         "name": "Arrosage automatique"
+      },
+      "mulch_active": {
+        "name": "Paillage"
       }
     },
     "time": {

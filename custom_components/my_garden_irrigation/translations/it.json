@@ -122,7 +122,8 @@
       "start_irrigation_now": { "name": "Avvia irrigazione ora" }
     },
     "switch": {
-      "auto_irrigation": { "name": "Irrigazione automatica" }
+      "auto_irrigation": { "name": "Irrigazione automatica" },
+      "mulch_active": { "name": "Pacciamatura" }
     },
     "time": {
       "irrigation_time": { "name": "Ora di irrigazione" }

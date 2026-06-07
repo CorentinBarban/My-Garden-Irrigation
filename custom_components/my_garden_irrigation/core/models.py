@@ -47,6 +47,9 @@ class CropResult:
     nb_plants: int
     density: float
 
+    # Paillage (ADR-029) — True si l'ETc a été atténué selon le stade FAO 56.
+    mulch_active: bool = False
+
     # Bilan hydrique (ADR-008) — valeurs par défaut pour la rétrocompatibilité
     watering_applied_today_liters: float = 0.0
     """Volume d'arrosage distribué aujourd'hui à cette culture (L), issu de la vanne globale."""

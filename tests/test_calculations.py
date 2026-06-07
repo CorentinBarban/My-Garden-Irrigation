@@ -3,7 +3,9 @@
 Fonctions pures — aucune dépendance HA, aucun mock nécessaire.
 """
 import pytest
+from custom_components.my_garden_irrigation.const import FAO56_MULCH_STAGE_FACTORS
 from custom_components.my_garden_irrigation.core.calculations import (
+    apply_mulch_factor,
     compute_balance_liters,
     compute_crop_result,
     compute_effective_rainfall_mm,
@@ -103,6 +105,38 @@ def test_net_liters_is_floored_balance():
 
 
 # ---------------------------------------------------------------------------
+# apply_mulch_factor (paillage phasé FAO 56, ADR-029)
+# ---------------------------------------------------------------------------
+
+def test_mulch_inactive_returns_etc_unchanged():
+    assert apply_mulch_factor(100.0, "ini", mulch_active=False) == pytest.approx(100.0)
+
+def test_mulch_active_ini_strong_attenuation():
+    # Stade initial : sol nu, abattement fort (−45 %)
+    assert apply_mulch_factor(100.0, "ini", mulch_active=True) == pytest.approx(55.0)
+
+def test_mulch_active_mid_marginal_attenuation():
+    # Mi-saison : canopée complète, abattement marginal (−10 %)
+    assert apply_mulch_factor(100.0, "mid", mulch_active=True) == pytest.approx(90.0)
+
+def test_mulch_active_end_attenuation():
+    assert apply_mulch_factor(100.0, "end", mulch_active=True) == pytest.approx(85.0)
+
+def test_mulch_unknown_stage_no_attenuation():
+    # Stade inconnu (ex. "dev" non défini) → facteur 1,0 (comportement sûr)
+    assert apply_mulch_factor(100.0, "dev", mulch_active=True) == pytest.approx(100.0)
+
+def test_mulch_factors_match_stage_ordering():
+    # L'abattement décroît à mesure que la canopée ombrage le sol : ini < mid < end < 1
+    assert (
+        FAO56_MULCH_STAGE_FACTORS["ini"]
+        < FAO56_MULCH_STAGE_FACTORS["end"]
+        < FAO56_MULCH_STAGE_FACTORS["mid"]
+        < 1.0
+    )
+
+
+# ---------------------------------------------------------------------------
 # compute_crop_result
 # ---------------------------------------------------------------------------
 
@@ -172,6 +206,37 @@ def test_crop_result_daily_need_equals_net_liters_regardless_of_watering():
     # daily_need_liters == net_liters, pas 0
     assert result.daily_need_liters == pytest.approx(result.liters, abs=0.2)
     assert result.daily_need_liters > 0
+
+def test_crop_result_mulch_attenuates_etc_and_need():
+    """ADR-029 : avec paillage, l'ETc (et donc le besoin) est atténué selon le stade."""
+    base = compute_crop_result(
+        nb_plants=10, density=2.0, kc=1.0, eto_mm=5.0,
+        precipitation_mm=0.0, crop_type="tomate", stage="ini",
+    )
+    mulched = compute_crop_result(
+        nb_plants=10, density=2.0, kc=1.0, eto_mm=5.0,
+        precipitation_mm=0.0, crop_type="tomate", stage="ini",
+        mulch_active=True,
+    )
+    # Stade ini → facteur 0,55 : ETc et besoin réduits d'autant.
+    assert mulched.etc_liters == pytest.approx(base.etc_liters * 0.55, abs=0.1)
+    assert mulched.liters == pytest.approx(base.liters * 0.55, abs=0.1)
+    assert mulched.mulch_active is True
+    assert base.mulch_active is False
+
+def test_crop_result_mulch_applied_before_rainfall_deduction():
+    """ADR-029 : l'atténuation porte sur l'ETc, la pluie efficace reste pleine.
+
+    ETc brut = 1,0×5×5 = 25L sur 5m² = 5mm ; paillage mid (0,9) → 22,5L = 4,5mm.
+    Pluie 5mm → eff 4mm. Bilan = (4,5 − 4)×5 = 2,5L (et non (5−4)×5 = 5L sans paillage).
+    """
+    mulched = compute_crop_result(
+        nb_plants=10, density=2.0, kc=1.0, eto_mm=5.0,
+        precipitation_mm=5.0, crop_type="tomate", stage="mid",
+        mulch_active=True,
+    )
+    assert mulched.effective_rainfall_mm == pytest.approx(4.0)
+    assert mulched.daily_balance_liters == pytest.approx(2.5, abs=0.1)
 
 def test_crop_result_weekly_projection():
     result = compute_crop_result(
@@ -252,6 +317,33 @@ def test_irrigation_data_total_balance_negative_on_rain():
     assert data.total_daily_need_liters == pytest.approx(0.0)
     assert data.total_daily_balance_liters < 0.0
 
+
+def test_irrigation_data_mulch_per_crop_attenuates():
+    """ADR-029 : le drapeau mulch_active par culture atténue son besoin, sans toucher les autres."""
+    crops = [
+        {"crop_id": "c1", "crop_type": "tomate", "stage": "ini",
+         "nb_plants": 10, "density": 2.0, "mulch_active": True},
+        {"crop_id": "c2", "crop_type": "tomate", "stage": "ini",
+         "nb_plants": 10, "density": 2.0, "mulch_active": False},
+    ]
+    data = compute_irrigation_data(
+        crops=crops, kc_data=_KC_DATA, eto_mm=5.0, kc_getter=_kc_getter,
+    )
+    assert data.crops["c1"].mulch_active is True
+    assert data.crops["c2"].mulch_active is False
+    # La culture paillée (stade ini, facteur 0,55) consomme moins que la non paillée.
+    assert data.crops["c1"].liters == pytest.approx(data.crops["c2"].liters * 0.55, abs=0.1)
+
+def test_irrigation_data_mulch_absent_defaults_off():
+    """Rétrocompatibilité : une culture sans clé mulch_active n'est pas atténuée."""
+    crops = [
+        {"crop_id": "c1", "crop_type": "tomate", "stage": "ini",
+         "nb_plants": 10, "density": 2.0},
+    ]
+    data = compute_irrigation_data(
+        crops=crops, kc_data=_KC_DATA, eto_mm=5.0, kc_getter=_kc_getter,
+    )
+    assert data.crops["c1"].mulch_active is False
 
 def test_irrigation_data_cumulative_need_passthrough():
     cumulative = {"c1": 12.5, "c2": 7.0}

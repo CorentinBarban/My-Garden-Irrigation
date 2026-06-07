@@ -122,7 +122,8 @@
       "start_irrigation_now": { "name": "Start irrigation now" }
     },
     "switch": {
-      "auto_irrigation": { "name": "Automatic irrigation" }
+      "auto_irrigation": { "name": "Automatic irrigation" },
+      "mulch_active": { "name": "Mulch" }
     },
     "time": {
       "irrigation_time": { "name": "Irrigation time" }
