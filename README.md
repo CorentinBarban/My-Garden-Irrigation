@@ -1,168 +1,187 @@
-# 🌿 My Garden Irrigation — Intégration Home Assistant
+# 🌿 My Garden Irrigation — Home Assistant Integration
+
+> 🌐 **Language:** English · [Français](README.fr.md)
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![quality_scale](https://img.shields.io/badge/Quality%20Scale-Silver-lightgrey.svg)](https://developers.home-assistant.io/docs/core/integration-quality-scale/)
 ![GitHub Tag](https://img.shields.io/github/v/tag/corentinBarban/My-Garden-Irrigation)
 
+**My Garden Irrigation** (`my_garden_irrigation`) is a custom Home Assistant integration that computes the water needs of vegetable garden crops and drives their watering. It relies on the evapotranspiration method from the **FAO Irrigation and Drainage Paper 56**.
 
-**My Garden Irrigation** (`my_garden_irrigation`) est une intégration personnalisée pour Home Assistant qui calcule les besoins en eau des cultures d'un potager et pilote leur arrosage. Elle s'appuie sur la méthode d'évapotranspiration de la publication **FAO Irrigation and Drainage Paper 56**.
-
-L'intégration récupère l'évapotranspiration de référence (ETo) et la pluviométrie quotidiennes via l'API **Open-Meteo**, et télécharge les coefficients culturaux (Kc) depuis un référentiel distant. Son mode de fonctionnement repose sur le principe du *cloud polling*.
+The integration fetches the daily reference evapotranspiration (ETo) and rainfall through the **Open-Meteo** API, and downloads crop coefficients (Kc) from a remote repository. Its operating mode is based on the _cloud polling_ principle.
 
 ---
 
-## 📐 Principe de calcul
+## 📐 Calculation principle
 
-### Besoin brut du jour
+### Daily gross need
 
-L'estimation repose sur la formule d'agronomie standard :
+The estimate relies on the standard agronomy formula:
 
 ```
 ETc = Kc × ETo
 ```
 
-- **ETo** : évapotranspiration de référence journalière (mm/jour), issue d'Open-Meteo.
-- **Kc** : coefficient cultural propre à chaque plante, indexé selon son stade de croissance.
-- **ETc** : besoin en eau brut, converti en litres selon la surface occupée.
+- **ETo**: daily reference evapotranspiration (mm/day), provided by Open-Meteo.
+- **Kc**: crop coefficient specific to each plant, indexed by its growth stage.
+- **ETc**: gross water need, converted to liters according to the occupied area.
 
-La surface d'une parcelle est automatiquement déduite à partir du **nombre de plants** et de la **densité de plantation** (plants par m²).
+A plot's area is automatically derived from the **number of plants** and the **planting density** (plants per m²).
 
-### Bilan hydrique signé et réserve de pluie
+### 🍂 Mulch (dynamic, phased attenuation)
 
-L'intégration tient une **comptabilité hydrique signée** du sol, qui mémorise aussi bien le déficit que le surplus :
+When a plot is mulched, the soil's direct evaporation drops — but **not by a fixed amount**: the effect depends on the crop's phenological stage (FAO-56). The integration therefore applies a **dynamic, stage-phased attenuation factor** to the ETc, *before* deducting effective rainfall (mulch reduces the evaporative demand, not the rainfall received):
+
+| Stage | Factor | Effect | Why |
+|-------|--------|--------|-----|
+| `ini` — Initial | **0.55** | −45 % | Bare soil: direct evaporation dominates, mulch blocks most of it. |
+| `mid` — Mid-season | **0.90** | −10 % | Full canopy: leaf transpiration dominates, mulch effect is marginal. |
+| `end` — End of season | **0.85** | −15 % | Onset of senescence: the canopy opens, soil evaporation rises slightly. |
+
+- Mulch is a **per-plot flag**: enable it once via the **Mulch** switch, and the factor follows the stage changes automatically across the season — no further intervention.
+- An unknown stage falls back to a **neutral factor of 1.0** (no attenuation): safe behavior, never amplification.
+- A non-mulched plot keeps exactly the standard `ETc = Kc × ETo` calculation.
+
+This avoids both **over-watering early in the cycle** (where mulch blocks far more than a flat factor) and **under-watering in mid-season** (the critical fruiting period).
+
+### Signed water balance and rainfall reserve
+
+The integration keeps a **signed water accounting** of the soil, which records both the deficit and the surplus:
 
 ```
-Bilan du jour = ETc − pluie efficace
-Besoin cumulé += bilan du jour          (à minuit)
-Besoin cumulé −= volume réellement arrosé
+Daily balance = ETc − effective rainfall
+Cumulative need += daily balance        (at midnight)
+Cumulative need −= volume actually watered
 ```
 
-- Le **besoin cumulé** peut être **positif** (dette : le sol a soif) ou **négatif** (réserve : surplus de pluie reporté sur les jours suivants).
-- Après plusieurs jours de pluie, la **réserve** constituée espace ou annule automatiquement les arrosages suivants, jusqu'à épuisement.
-- La pluie n'est retenue qu'à hauteur de son **efficacité réelle** (facteur 0,8 sur la pluie brute).
-- Le volume effectivement distribué est imputé **une seule fois** au bilan, garantissant une comptabilité fiable.
+- The **cumulative need** can be **positive** (debt: the soil is thirsty) or **negative** (reserve: rainfall surplus carried over to the following days).
+- A **negative cumulative need** is the **rain reserve**: when rainfall exceeds the day's ETc, the surplus is *not discarded* — it is stored as a negative balance. As long as this reserve lasts, the integration automatically **spaces out or skips** the following waterings, and only resumes once the reserve is depleted and the balance climbs back above zero.
+- Rainfall is retained only up to its **actual efficiency** (0.8 factor on gross rainfall).
+- The volume actually delivered is charged to the balance **only once**, ensuring reliable accounting.
 
-> Le besoin affiché à l'utilisateur reste plafonné à 0 (`max(0, bilan)`), tandis que le bilan signé pilote en interne la décision d'arroser ou non.
+> The need displayed to the user stays capped at 0 (`max(0, balance)`) so a reserve never shows as a "negative volume", while the signed balance internally keeps the negative reserve and drives the decision whether to water or not.
 
 ---
 
-## 📊 Entités générées
+## 📊 Generated entities
 
-### 🔍 Capteurs (`sensor`)
+### 🔍 Sensors (`sensor`)
 
-**Par parcelle de culture :**
+**Per crop plot:**
 
-- **Irrigation** : volume requis du jour (litres), avec une liste d'attributs détaillés :
-  - `crop_type`, `stage` : type de culture et stade actuel.
-  - `nb_plants`, `density_plants_per_m2`, `surface_m2` : géométrie de la parcelle.
-  - `kc`, `eto_mm` : valeurs agronomiques du jour.
-  - `precipitation_mm`, `effective_rainfall_mm` : pluie brute et pluie efficace retenue.
-  - `etc_liters`, `net_liters` : besoin brut et bilan net du jour.
-  - `watering_applied_today_liters` : volume déjà distribué aujourd'hui.
-  - `cumulative_need_liters` : besoin hydrique cumulé (signé).
-  - `recommended_duration_minutes` : durée d'arrosage recommandée selon le débit configuré.
-  - `liters_per_plant`, `weekly_projection_l` : indicateurs de suivi.
-  - **Mode fractionné** (si activé) : `is_fractioned`, `cycles_count`, `duration_per_cycle_minutes`, `soak_duration_minutes`.
-- **Kc** et **ETo** : valeurs agronomiques exposées individuellement.
-- **Besoin cumulé** : bilan signé propre à la parcelle.
+- **Irrigation**: required volume of the day (liters), with a list of detailed attributes:
+  - `crop_type`, `stage`: crop type and current stage.
+  - `nb_plants`, `density_plants_per_m2`, `surface_m2`: plot geometry.
+  - `kc`, `eto_mm`: agronomic values of the day.
+  - `mulch_active`: whether the stage-phased mulch attenuation is applied to this plot.
+  - `precipitation_mm`, `effective_rainfall_mm`: gross rainfall and retained effective rainfall.
+  - `etc_liters`, `net_liters`: gross need and net balance of the day.
+  - `watering_applied_today_liters`: volume already delivered today.
+  - `cumulative_need_liters`: cumulative water need (signed).
+  - `recommended_duration_minutes`: recommended watering duration based on the configured flow rate.
+  - `liters_per_plant`, `weekly_projection_l`: tracking indicators.
+  - **Fractioned mode** (if enabled): `is_fractioned`, `cycles_count`, `duration_per_cycle_minutes`, `soak_duration_minutes`.
+- **Kc** and **ETo**: agronomic values exposed individually.
+- **Cumulative need**: signed balance specific to the plot.
 
-**Au niveau du potager (centrale) :**
+**At the garden level (central unit):**
 
-- **Besoin journalier** : somme des besoins du jour de toutes les parcelles.
-- **Besoin cumulé** : bilan hydrique signé global.
-- **Précipitations journalières** : pluviométrie du jour (mm).
-- **Prochain arrosage** : date/heure du prochain arrosage planifié.
+- **Daily need**: sum of the day's needs across all plots.
+- **Cumulative need**: global signed water balance.
+- **Daily precipitation**: rainfall of the day (mm).
+- **Next watering**: date/time of the next scheduled watering.
 
-### ⚙️ Contrôles numériques (`number`)
+### ⚙️ Numeric controls (`number`)
 
-`Nombre de plants` · `Densité (plants/m²)` · `Débit de l'installation` · `Intervalle entre arrosages` · `Nombre de cycles` · `Repos entre cycles`.
+`Number of plants` · `Density (plants/m²)` · `Installation flow rate` · `Interval between waterings` · `Number of cycles` · `Rest between cycles`.
 
-### 🎛️ Sélecteurs (`select`)
+### 🎛️ Selectors (`select`)
 
-`Stade de croissance` · `Fréquence d'arrosage` · `Mode d'arrosage`.
+`Growth stage` · `Watering frequency` · `Watering mode`.
 
-### 🔘 Boutons (`button`)
+### 🔘 Buttons (`button`)
 
-- **Lancer l'arrosage maintenant** : déclenche immédiatement un arrosage.
-- **Réinitialiser l'irrigation** : remet à zéro le bilan hydrique cumulé.
+- **Water now**: immediately triggers a watering.
+- **Reset irrigation**: resets the cumulative water balance to zero.
 
-### 🔀 Interrupteur (`switch`) et 🕒 Heure (`time`)
+### 🔀 Switches (`switch`) and 🕒 Time (`time`)
 
-- **Arrosage automatique** : active/désactive l'émission automatique de l'événement d'arrosage.
-- **Heure d'arrosage** : heure quotidienne de déclenchement automatique.
+- **Automatic watering**: enables/disables the automatic emission of the watering event.
+- **Mulch** (per plot): enables the stage-phased ETc attenuation for a mulched plot.
+- **Watering time**: daily automatic trigger time.
 
-Toutes ces entités sont ajustables dynamiquement depuis vos tableaux de bord Lovelace.
+All these entities can be adjusted dynamically from your Lovelace dashboards.
 
 ---
 
-## 🥕 Cultures prises en charge
+## 🥕 Supported crops
 
-L'intégration intègre nativement les densités de plantation par défaut (plants/m²) pour **27 cultures** issues du référentiel FAO :
+The integration natively includes default planting densities (plants/m²) for **27 crops** from the FAO repository:
 
-Ail · Artichaut · Asperge · Aubergine · Basilic · Betterave · Brocoli · Carotte · Céleri · Chou · Chou-fleur · Concombre · Courgette · Épinard · Fraise · Haricot vert · Laitue · Melon · Oignon · Persil · Petits pois · Poireau · Poivron · Pomme de terre · Potiron · Radis · Tomate.
+Garlic · Artichoke · Asparagus · Eggplant · Basil · Beetroot · Broccoli · Carrot · Celery · Cabbage · Cauliflower · Cucumber · Zucchini · Spinach · Strawberry · Green bean · Lettuce · Melon · Onion · Parsley · Peas · Leek · Bell pepper · Potato · Pumpkin · Radish · Tomato.
 
-### 🔄 Stades de croissance
+### 🔄 Growth stages
 
-Pour chaque parcelle, vous choisissez le stade de développement :
+For each plot, you choose the development stage:
 
-- `ini` — **Initial** (semis / reprise)
-- `mid` — **Mi-saison** (plein développement)
-- `end` — **Fin de saison** (maturation)
+- `ini` — **Initial** (sowing / regrowth)
+- `mid` — **Mid-season** (full development)
+- `end` — **End of season** (maturation)
 
 ---
 
 ## 🛠️ Configuration
 
-La mise en place s'effectue entièrement via l'interface graphique de Home Assistant (**Config Flow**). Le menu d'options regroupe :
+Setup is performed entirely through the Home Assistant graphical interface (**Config Flow**). The options menu gathers:
 
-- **Ajouter / Supprimer une culture** : nom de parcelle, type, stade, nombre de plants et densité (pré-remplie selon le référentiel FAO).
-- **Vanne globale** : liaison avec une entité vanne ou interrupteur (`global_valve_entity_id`) et saisie du débit total de l'installation (`global_flow_rate`, en L/h) pour estimer la durée d'arrosage. Laissez vide pour désactiver le suivi automatique.
-- **Fréquence et mode d'arrosage** :
-  - **Fréquence** : `daily` (quotidien) ou `interval` (intervalle fixe de X jours).
-  - **Mode** :
-    - **Continu** (`continuous`).
-    - **Fractionné** (`fractioned`) : séquence l'arrosage en plusieurs cycles (3 par défaut) entrecoupés de pauses (15 min par défaut) pour éviter le ruissellement et favoriser l'infiltration.
-- **Arrosage automatique** : heure de déclenchement quotidien de l'événement d'arrosage.
-
----
-
-## 🤖 Arrosage automatique et pilotage de la vanne
-
-L'intégration ne pilote pas directement votre matériel : elle **émet un événement** que vous reliez à votre vanne physique via un blueprint. Cette séparation garantit la sécurité d'extinction et reste agnostique de votre installation.
-
-1. Configurez la **vanne globale** et activez le switch **« Arrosage automatique »**.
-2. À l'heure configurée (ou selon l'intervalle), la centrale émet l'événement `my_garden_irrigation_irrigation_requested` **uniquement si un arrosage est réellement nécessaire** (le calendrier se réancre sur l'arrosage effectif, pas sur le simple écoulement de l'intervalle).
-3. Importez le **blueprint fourni** ([`watering_blueprint.yaml`](blueprints/automation/my_garden_irrigation/watering_blueprint.yaml)) pour lier cet événement à votre vanne. Le blueprint s'appuie sur le moteur natif de Home Assistant : **si HA redémarre en cours d'arrosage, la vanne est coupée automatiquement à la reprise**.
+- **Add / Remove a crop**: plot name, type, stage, number of plants and density (pre-filled according to the FAO repository).
+- **Global valve**: link to a valve or switch entity (`global_valve_entity_id`) and entry of the installation's total flow rate (`global_flow_rate`, in L/h) to estimate the watering duration. Leave empty to disable automatic tracking.
+- **Watering frequency and mode**:
+  - **Frequency**: `daily` or `interval` (fixed interval of X days).
+  - **Mode**:
+    - **Continuous** (`continuous`).
+    - **Fractioned** (`fractioned`): sequences the watering into several cycles (3 by default) interspersed with pauses (15 min by default) to avoid runoff and promote infiltration.
+- **Automatic watering**: daily trigger time of the watering event.
 
 ---
 
-## 🚀 Service exposé
+## 🤖 Automatic watering and valve control
 
-- **`my_garden_irrigation.recalculate`** : force le recalcul immédiat de tous les besoins en eau, sans attendre la planification automatique. Utile après une mise à jour manuelle de l'ETo ou pour tester une automatisation.
+The integration does not drive your hardware directly: it **emits an event** that you link to your physical valve through a blueprint. This separation guarantees shut-off safety and remains agnostic of your installation.
+
+1. Configure the **global valve** and enable the **"Automatic watering"** switch.
+2. At the configured time (or according to the interval), the central unit emits the `my_garden_irrigation_irrigation_requested` event **only if a watering is actually needed** (the schedule re-anchors on the effective watering, not on the mere elapse of the interval).
+3. Import the **provided blueprint** ([`watering_blueprint.yaml`](blueprints/automation/my_garden_irrigation/watering_blueprint.yaml)) to link this event to your valve. The blueprint relies on Home Assistant's native engine: **if HA restarts during a watering, the valve is automatically shut off on resume**.
+
+---
+
+## 🚀 Exposed service
+
+- **`my_garden_irrigation.recalculate`**: forces the immediate recalculation of all water needs, without waiting for the automatic scheduling. Useful after a manual ETo update or to test an automation.
 
 ---
 
 ## 📥 Installation
 
-### 🛒 Via HACS (recommandé)
+### 🛒 Via HACS (recommended)
 
-1. Ouvrez **HACS** dans votre instance Home Assistant.
-2. Menu (trois points en haut à droite) → **Dépôts personnalisés**.
-3. Renseignez l'URL de ce dépôt, catégorie **Intégration**, puis **Ajouter**.
-4. Recherchez `My Garden Irrigation` et cliquez sur **Télécharger**.
-5. Redémarrez Home Assistant.
+1. Open **HACS** in your Home Assistant instance.
+2. Menu (three dots, top right) → **Custom repositories**.
+3. Enter the URL of this repository, category **Integration**, then **Add**.
+4. Search for `My Garden Irrigation` and click **Download**.
+5. Restart Home Assistant.
 
-### ⚙️ Configuration initiale
+### ⚙️ Initial configuration
 
-1. **Paramètres** → **Appareils et services**.
-2. **Ajouter une intégration** → recherchez `My Garden Irrigation`.
-3. Suivez les formulaires guidés pour ajouter vos cultures et lier votre vanne.
+1. **Settings** → **Devices & services**.
+2. **Add integration** → search for `My Garden Irrigation`.
+3. Follow the guided forms to add your crops and link your valve.
 
 ---
 
-## 📋 Prérequis
+## 📋 Requirements
 
-- Home Assistant 2024.1 ou version ultérieure.
-- HACS opérationnel.
-- Coordonnées géographiques renseignées dans Home Assistant (pour la récupération Open-Meteo).
-- Connexion Internet active (requêtes Open-Meteo et référentiel Kc — *cloud polling*).
+- Home Assistant 2024.1 or later.
+- A working HACS.
+- Geographic coordinates set in Home Assistant (for the Open-Meteo retrieval).
+- An active Internet connection (Open-Meteo requests and Kc repository — _cloud polling_).
