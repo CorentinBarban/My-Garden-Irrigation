@@ -2,7 +2,8 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![quality_scale](https://img.shields.io/badge/Quality%20Scale-Silver-lightgrey.svg)](https://developers.home-assistant.io/docs/core/integration-quality-scale/)
-Version : 1.0.0
+![GitHub Tag](https://img.shields.io/github/v/tag/corentinBarban/My-Garden-Irrigation)
+
 
 **My Garden Irrigation** (`my_garden_irrigation`) est une intégration personnalisée pour Home Assistant qui calcule les besoins en eau des cultures d'un potager et pilote leur arrosage. Elle s'appuie sur la méthode d'évapotranspiration de la publication **FAO Irrigation and Drainage Paper 56**.
 
