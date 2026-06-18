@@ -37,10 +37,12 @@
           "crop_type": "Cultivo",
           "stage": "Etapa de crecimiento",
           "nb_plants": "Número de plantas",
-          "density": "Densidad de plantación (plantas/m²)"
+          "density": "Densidad de plantación (plantas/m²)",
+          "mulch_active": "Acolchado"
         },
         "data_description": {
-          "density": "Densidad FAO por defecto: {fao_densities}"
+          "density": "Densidad FAO por defecto: {fao_densities}",
+          "mulch_active": "Activa la atenuación de la ETc según la etapa FAO 56 (ADR-029). Desactivado por defecto."
         }
       },
       "remove_crop": {

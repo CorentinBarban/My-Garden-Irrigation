@@ -37,10 +37,12 @@
           "crop_type": "Culture",
           "stage": "Stade de croissance",
           "nb_plants": "Nombre de plants",
-          "density": "Densité de plantation (plants/m²)"
+          "density": "Densité de plantation (plants/m²)",
+          "mulch_active": "Paillage"
         },
         "data_description": {
-          "density": "Densité FAO par défaut : {fao_densities}"
+          "density": "Densité FAO par défaut : {fao_densities}",
+          "mulch_active": "Active l'atténuation de l'ETc selon le stade FAO 56 (ADR-029). Désactivé par défaut."
         }
       },
       "remove_crop": {

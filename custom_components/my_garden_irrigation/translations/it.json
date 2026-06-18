@@ -37,10 +37,12 @@
           "crop_type": "Coltura",
           "stage": "Stadio di crescita",
           "nb_plants": "Numero di piante",
-          "density": "Densità di piantagione (piante/m²)"
+          "density": "Densità di piantagione (piante/m²)",
+          "mulch_active": "Pacciamatura"
         },
         "data_description": {
-          "density": "Densità FAO predefinita: {fao_densities}"
+          "density": "Densità FAO predefinita: {fao_densities}",
+          "mulch_active": "Attiva l'attenuazione dell'ETc secondo lo stadio FAO 56 (ADR-029). Disattivato per impostazione predefinita."
         }
       },
       "remove_crop": {

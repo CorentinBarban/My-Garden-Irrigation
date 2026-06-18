@@ -174,6 +174,8 @@ class MyGardenIrrigationCard extends HTMLElement {
       crops.push({
         name: (dev && (dev.name_by_user || dev.name)) || at(daily).crop_type,
         daily,
+        // Commutateur de paillage de la culture (atténuation ETc, ADR-029).
+        mulch: ids.find((id) => id.startsWith("switch.")) || null,
       });
     }
     crops.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -219,6 +221,7 @@ class MyGardenIrrigationCard extends HTMLElement {
     h.controls.forEach(add);
     data.crops.forEach((c) => {
       add(c.daily);
+      add(c.mulch);
       const a = this._attr(c.daily);
       parts.push((a.watering_applied_today_liters ?? "") + "/" + (a.net_liters ?? ""));
     });
@@ -431,12 +434,20 @@ class MyGardenIrrigationCard extends HTMLElement {
     const applied = a.watering_applied_today_liters;
     let pct = 0;
     if (net > 0 && applied != null) pct = Math.min(100, (applied / net) * 100);
+    const mulchOn = c.mulch && this._st(c.mulch) === "on";
+    const mulchBadge = c.mulch
+      ? `<button class="mulch ${mulchOn ? "on" : ""}" data-mulch="${c.mulch}"
+           title="Paillage ${mulchOn ? "activé" : "désactivé"}">
+           <ha-icon icon="mdi:grass"></ha-icon>
+         </button>`
+      : "";
     return `
       <div class="crop" data-more="${c.daily}">
         <ha-icon icon="mdi:sprout"></ha-icon>
         <div class="crop-main">
           <div class="crop-top">
             <span class="crop-name">${c.name || "Culture"}</span>
+            ${mulchBadge}
             <span class="crop-need">${need} L</span>
           </div>
           <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div>
@@ -470,6 +481,16 @@ class MyGardenIrrigationCard extends HTMLElement {
       el.addEventListener("click", () =>
         this._moreInfo(el.getAttribute("data-more"))
       )
+    );
+
+    // Bascule du paillage — stoppe la propagation pour ne pas ouvrir le more-info.
+    this.querySelectorAll("[data-mulch]").forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._hass.callService("switch", "toggle", {
+          entity_id: b.getAttribute("data-mulch"),
+        });
+      })
     );
 
     this.querySelectorAll("[data-act]").forEach((b) =>
@@ -659,7 +680,13 @@ MyGardenIrrigationCard.styles = `
   .crop-top { display:flex; justify-content:space-between; gap:8px; }
   .crop-name { font-size:.9rem; font-weight:500; overflow:hidden;
     text-overflow:ellipsis; white-space:nowrap; }
-  .crop-need { font-variant-numeric: tabular-nums; flex:none; font-size:.9rem; }
+  .mulch { flex:none; display:inline-flex; align-items:center; justify-content:center;
+    margin-left:auto; border:none; cursor:pointer; padding:2px; border-radius:50%;
+    background:transparent; color: var(--disabled-text-color); }
+  .mulch ha-icon { --mdc-icon-size:18px; }
+  .mulch.on { color: #43a047; }
+  .crop-need { font-variant-numeric: tabular-nums; flex:none; font-size:.9rem;
+    margin-left:8px; }
   .bar { height:5px; border-radius:5px; margin-top:6px;
     background: var(--divider-color); overflow:hidden; }
   .bar-fill { height:100%; background: var(--primary-color); border-radius:5px;
@@ -680,7 +707,7 @@ window.customCards.push({
 });
 
 console.info(
-  "%c MY-GARDEN-IRRIGATION-CARD %c v2 ",
+  "%c MY-GARDEN-IRRIGATION-CARD %c v3 ",
   "background:#43a047;color:#fff;border-radius:4px 0 0 4px;padding:2px 4px",
   "background:#1b5e20;color:#fff;border-radius:0 4px 4px 0;padding:2px 4px"
 );

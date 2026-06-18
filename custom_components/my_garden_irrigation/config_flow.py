@@ -37,6 +37,7 @@ from .const import (
     CONF_GLOBAL_FLOW_RATE,
     CONF_GLOBAL_VALVE_ENTITY_ID,
     CONF_IRRIGATION_TIME,
+    CONF_MULCH_ACTIVE,
     CONF_NAME,
     CONF_NB_PLANTS,
     CONF_SOAK_DURATION,
@@ -184,6 +185,9 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
                         CONF_STAGE: user_input[CONF_STAGE],
                         CONF_NB_PLANTS: int(user_input[CONF_NB_PLANTS]),
                         CONF_DENSITY: float(user_input[CONF_DENSITY]),
+                        CONF_MULCH_ACTIVE: bool(
+                            user_input.get(CONF_MULCH_ACTIVE, False)
+                        ),
                     }
                 )
                 _LOGGER.info("Culture ajoutée : %s (%s)", crop_name_raw.strip(), crop_type)
@@ -216,6 +220,9 @@ class IrrigationOptionsFlowHandler(OptionsFlowWithReload):
                             min=0.1, max=1_000, step=0.1, mode="box"
                         )
                     ),
+                    vol.Optional(
+                        CONF_MULCH_ACTIVE, default=False
+                    ): selector.BooleanSelector(),
                 }
             ),
             description_placeholders={
