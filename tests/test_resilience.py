@@ -20,7 +20,7 @@ Bugs couverts :
 import asyncio
 import logging
 import pytest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from custom_components.my_garden_irrigation.config_state import RuntimeConfigState
@@ -1671,12 +1671,12 @@ def test_set_watering_interval_days_calls_reschedule():
     coord._scheduler.reschedule_auto_irrigation.assert_called_once_with(reanchor=True)
 
 
-def test_compute_next_trigger_interval_reanchor_full_days():
-    """Ré-ancrage (changement d'intervalle) : next = N jours PLEINS depuis maintenant.
+def test_compute_next_trigger_interval_reanchor_after_slot():
+    """Ré-ancrage (changement d'intervalle) : next = jour calendaire today + N.
 
-    Bug : « tous les 3 jours » affichait « dans 2 jours » (interval - 1) car le
-    créneau d'arrosage (06:00) était déjà passé au moment de la configuration.
-    Avec le ré-ancrage, le compte à rebours affiché correspond à l'intervalle.
+    Bug : configurer après le créneau (06:00) ajoutait un jour de trop → today + N + 1
+    (jeudi devenait vendredi pour interval=3). Le ré-ancrage doit donner le même jour
+    calendaire que la configuration avant le créneau : today + N.
     """
     from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
     from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
@@ -1694,9 +1694,9 @@ def test_compute_next_trigger_interval_reanchor_full_days():
     now = datetime(2026, 6, 4, 10, 0, 0, tzinfo=timezone.utc)
     result = scheduler._compute_next_trigger(now, 6, 0, reanchor=True)
 
-    # +1 jour car le créneau de 06:00 est déjà passé → 08/06, soit 3 jours pleins.
-    assert result.date() == date(2026, 6, 8)
-    assert (result - now).days == 3
+    # Jour calendaire 04/06 + 3 = 07/06, indépendamment de l'heure de configuration.
+    assert result.date() == date(2026, 6, 7)
+    assert result.hour == 6 and result.minute == 0
 
 
 def test_compute_next_trigger_interval_reanchor_before_slot():
@@ -1719,6 +1719,70 @@ def test_compute_next_trigger_interval_reanchor_before_slot():
 
     assert result.date() == date(2026, 6, 7)
     assert (result - now).days == 3
+
+
+@pytest.mark.parametrize(
+    "interval, weekday_in, weekday_out",
+    [
+        # lundi=0 … samedi=5 ; vérifie « jour d'arrosage → next » de la table utilisateur.
+        (2, 0, 2), (2, 1, 3), (2, 2, 4), (2, 3, 5), (2, 4, 6), (2, 5, 0),
+        (3, 0, 3), (3, 1, 4), (3, 2, 5), (3, 3, 6), (3, 4, 0), (3, 5, 1),
+    ],
+)
+def test_compute_next_trigger_interval_reanchor_calendar_days(interval, weekday_in, weekday_out):
+    """Ré-ancrage = jour calendaire today + N, identique avant/après le créneau."""
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    base = date(2026, 6, 22)  # lundi
+    day = base + timedelta(days=weekday_in)
+
+    for hour_now in (5, 10):  # avant puis après le créneau de 06:00
+        config = _make_state(
+            **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: interval}
+        )
+        config.update_last_watering_date(day.isoformat())
+        with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+            scheduler = IrrigationScheduler(MagicMock(), config, AsyncMock(), AsyncMock())
+
+        now = datetime(day.year, day.month, day.day, hour_now, 0, 0, tzinfo=timezone.utc)
+        result = scheduler._compute_next_trigger(now, 6, 0, reanchor=True)
+
+        assert result.weekday() == weekday_out
+        assert (result.hour, result.minute) == (6, 0)
+
+
+@pytest.mark.parametrize(
+    "interval, weekday_in, weekday_out",
+    [
+        (2, 0, 2), (2, 1, 3), (2, 2, 4), (2, 3, 5), (2, 4, 6), (2, 5, 0),
+        (3, 0, 3), (3, 1, 4), (3, 2, 5), (3, 3, 6), (3, 4, 0), (3, 5, 1),
+    ],
+)
+def test_reschedule_after_watering_anchors_on_last_date(interval, weekday_in, weekday_out):
+    """Reschedule post-arrosage : next = jour d'arrosage + N, en ignorant un override périmé."""
+    from custom_components.my_garden_irrigation.scheduler import IrrigationScheduler
+    from custom_components.my_garden_irrigation.const import WATERING_FREQUENCY_INTERVAL
+
+    base = date(2026, 6, 22)  # lundi
+    day = base + timedelta(days=weekday_in)
+
+    config = _make_state(
+        **{CONF_WATERING_FREQUENCY: WATERING_FREQUENCY_INTERVAL, CONF_WATERING_INTERVAL_DAYS: interval}
+    )
+    # Override résiduel d'un ancien réglage ; un arrosage réel doit le purger.
+    config.set_next_watering_override("2999-01-01T06:00:00")
+    config.update_last_watering_date(day.isoformat())
+    assert config.next_watering_override is None
+
+    with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
+        scheduler = IrrigationScheduler(MagicMock(), config, AsyncMock(), AsyncMock())
+
+    now = datetime(day.year, day.month, day.day, 6, 0, 0, tzinfo=timezone.utc)
+    result = scheduler._compute_next_trigger(now, 6, 0, reanchor=False)
+
+    assert result.weekday() == weekday_out
+    assert (result.hour, result.minute) == (6, 0)
 
 
 def test_compute_next_trigger_interval_no_reanchor_is_stable():
@@ -1763,7 +1827,7 @@ def test_reanchor_persists_override_and_survives_restart():
     with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
         scheduler = IrrigationScheduler(hass, config, AsyncMock(), AsyncMock())
 
-    # Ré-ancrage à 10:00 → cible 08/06 06:00, persistée dans l'override.
+    # Ré-ancrage à 10:00 → cible calendaire 07/06 06:00, persistée dans l'override.
     target = scheduler._compute_next_trigger(
         datetime(2026, 6, 4, 10, 0, 0, tzinfo=timezone.utc), 6, 0, reanchor=True
     )
@@ -1780,10 +1844,10 @@ def test_reanchor_persists_override_and_survives_restart():
     with patch("custom_components.my_garden_irrigation.scheduler.async_track_point_in_time"):
         scheduler2 = IrrigationScheduler(hass, restored, AsyncMock(), AsyncMock())
 
-    # Redémarrage le 06/06 sans ré-ancrage : la cible persistée (08/06) prime.
+    # Redémarrage le 06/06 sans ré-ancrage : la cible persistée (07/06) prime.
     now = datetime(2026, 6, 6, 8, 0, 0, tzinfo=timezone.utc)
     result = scheduler2._compute_next_trigger(now, 6, 0, reanchor=False)
-    assert result.date() == date(2026, 6, 8)
+    assert result.date() == date(2026, 6, 7)
 
 
 def test_real_watering_clears_override():

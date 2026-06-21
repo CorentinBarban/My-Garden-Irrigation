@@ -104,16 +104,18 @@ class IrrigationScheduler:
             interval_days = self._config.watering_interval_days
 
             if reanchor:
-                # Vise N jours pleins après maintenant, à l'heure du créneau. Si le
-                # créneau du jour cible est déjà passé, décale d'un jour pour que la
-                # durée restante affichée corresponde à l'intervalle choisi.
-                target = now + timedelta(days=interval_days)
-                next_trigger = target.replace(
-                    hour=hour, minute=minute, second=0, microsecond=0
+                # Vise le jour calendaire N jours après aujourd'hui, à l'heure du
+                # créneau : Lundi + 3 → Jeudi, indépendamment de l'heure courante.
+                next_date = now.date() + timedelta(days=interval_days)
+                return now.replace(
+                    year=next_date.year,
+                    month=next_date.month,
+                    day=next_date.day,
+                    hour=hour,
+                    minute=minute,
+                    second=0,
+                    microsecond=0,
                 )
-                if next_trigger < target:
-                    next_trigger += timedelta(days=1)
-                return next_trigger
 
             # Date cible persistée par un ré-ancrage antérieur : prioritaire tant
             # qu'elle est future, à l'heure du créneau courant. Survit aux redémarrages.
