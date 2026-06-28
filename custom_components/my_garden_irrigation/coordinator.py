@@ -9,6 +9,7 @@ connaissent pas ce coordinateur.
 ADR-008 : bilan hydrique cumulé.
 ADR-009 : vanne globale — géré par ValveTracker.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -96,7 +97,10 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
                 stored.get("daily_ledger", [])
             )
 
-        if self.config.auto_irrigation_enabled and self.config.last_auto_watering_date is None:
+        if (
+            self.config.auto_irrigation_enabled
+            and self.config.last_auto_watering_date is None
+        ):
             self.config.set_auto_irrigation(True, dt_util.now().date().isoformat())
 
         tracker = ValveTracker(
@@ -122,7 +126,9 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         await self.async_config_entry_first_refresh()
 
         if self.data is not None:
-            daily_needs = {cid: r.daily_need_liters for cid, r in self.data.crops.items()}
+            daily_needs = {
+                cid: r.daily_need_liters for cid, r in self.data.crops.items()
+            }
             new_crops_added = self.config.init_missing_crops(daily_needs)
             # Sauvegarde systématique : aligne l'options_hash persisté sur
             # entry.options courant pour préserver les overrides entity au rechargement.
@@ -262,7 +268,9 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
         await self.async_refresh()
 
     async def async_reset_irrigation(self) -> None:
-        self._log.info("Réinitialisation du bilan hydrique cumulé (action utilisateur).")
+        self._log.info(
+            "Réinitialisation du bilan hydrique cumulé (action utilisateur)."
+        )
         self.config.reset_irrigation()
         self._daily_ledger = DailyWaterLedger()
         await self._async_save()
@@ -392,7 +400,9 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             cumulative_need=self.config.cumulative_need,
         )
         now = dt_util.now()
-        self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
+        self._last_daily_needs = {
+            cid: r.daily_need_liters for cid, r in data.crops.items()
+        }
         # Le journal porte le bilan hydrique signé du jour (ADR-028) — distinct du
         # besoin affiché (≥ 0) ; un surplus de pluie (valeur négative) alimente la réserve.
         for crop_id, result in data.crops.items():
@@ -419,7 +429,9 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             cumulative_need=self.config.cumulative_need,
         )
         now = dt_util.now()
-        self._last_daily_needs = {cid: r.daily_need_liters for cid, r in data.crops.items()}
+        self._last_daily_needs = {
+            cid: r.daily_need_liters for cid, r in data.crops.items()
+        }
         # Le journal porte le bilan hydrique signé du jour (ADR-028) — distinct du
         # besoin affiché (≥ 0) ; un surplus de pluie (valeur négative) alimente la réserve.
         for crop_id, result in data.crops.items():
@@ -460,6 +472,7 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             "daily": "et0_fao_evapotranspiration_sum,precipitation_sum",
             "timezone": "auto",
             "forecast_days": 1,
+            "models": "meteofrance_seamless",
         }
 
         response_data: dict | None = None
@@ -500,12 +513,16 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             eto_mm = daily["et0_fao_evapotranspiration_sum"][0]
             precipitation_mm = daily["precipitation_sum"][0]
         except (KeyError, IndexError, TypeError) as exc:
-            raise UpdateFailed(f"Réponse Open-Meteo invalide : {response_data!r}") from exc
+            raise UpdateFailed(
+                f"Réponse Open-Meteo invalide : {response_data!r}"
+            ) from exc
 
         if eto_mm is None:
             raise UpdateFailed("L'ETo retourné par Open-Meteo est None.")
 
-        precipitation_mm = float(precipitation_mm) if precipitation_mm is not None else 0.0
+        precipitation_mm = (
+            float(precipitation_mm) if precipitation_mm is not None else 0.0
+        )
         self._log.debug(
             "Open-Meteo — ETo=%.2f mm/j, précipitations=%.2f mm",
             float(eto_mm),
@@ -560,4 +577,3 @@ class IrrigationCoordinator(DataUpdateCoordinator[IrrigationData]):
             )
 
         self._save_unsub = async_call_later(self.hass, 0.5, _trigger)
-
